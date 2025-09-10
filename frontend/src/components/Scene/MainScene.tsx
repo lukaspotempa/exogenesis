@@ -30,14 +30,6 @@ export function MainScene(): React.JSX.Element {
         />
       ))}
 
-      <Ship1 />
-
-      {/* Reference cube */}
-      <mesh position={[2, 0, 0]} scale={0.5}>
-        <boxGeometry />
-        <meshStandardMaterial color="hotpink" />
-      </mesh>
-
       <ambientLight intensity={0.6} />
       <directionalLight
         position={[10, 10, 5]}
