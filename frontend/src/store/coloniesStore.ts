@@ -3,6 +3,7 @@ import type { Colony } from '../types/Types';
 class ColoniesStore {
     private colonies: Colony[] = [];
     private listeners: (() => void)[] = [];
+    private activeColony: Colony | undefined;
 
     setColonies(colonies: Colony[]) {
         this.colonies = colonies;
@@ -28,6 +29,15 @@ class ColoniesStore {
         return () => {
             this.listeners = this.listeners.filter(l => l !== listener);
         };
+    }
+
+    setActiveColony(colony: Colony) {
+        this.activeColony = colony;
+    }
+
+    removeActiveColony() {
+        this.activeColony = undefined;
+        this.notifyListeners();
     }
 
     private notifyListeners() {

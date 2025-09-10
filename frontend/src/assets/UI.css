@@ -1,9 +1,16 @@
-.UI {
+.colony-list-container {
     position: fixed;
     top: 2vh;
-    right: 5%;
+    right: 3%;
     pointer-events: auto;
-    /* make sure the UI sits above the three.js canvas */
+    z-index: 9999;
+}
+
+.colony-details-container {
+    position: fixed;
+    top: 2vh;
+    left: 3%;
+    pointer-events: auto;
     z-index: 9999;
 }
 

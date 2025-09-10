@@ -2,6 +2,7 @@ import type { Colony } from '../types/Types';
 
 export const sampleColonies: Colony[] = [
   {
+    id: '1',
     name: "New Terra",
     residents: 15000,
     color: "#4A90E2",
@@ -16,10 +17,12 @@ export const sampleColonies: Colony[] = [
         steel: 0.8,
         oil: 1.1,
         temperature: 15
-      }
-    }
+      },
+    },
+    colonyLevel: 'Colony',
   },
   {
+    id: '2',
     name: "Aurora Station",
     residents: 8500,
     color: "#7ED321",
@@ -35,9 +38,11 @@ export const sampleColonies: Colony[] = [
         oil: 1.3,
         temperature: 5
       }
-    }
+    },
+    colonyLevel: 'Colony'
   },
   {
+    id: '3',
     name: "Crimson Outpost",
     residents: 12300,
     color: "#D0021B",
@@ -53,9 +58,11 @@ export const sampleColonies: Colony[] = [
         oil: 0.8,
         temperature: 28
       }
-    }
+    },
+    colonyLevel: 'Colony'
   },
   {
+    id: '4',
     name: "Azure Haven",
     residents: 20000,
     color: "#50E3C2",
@@ -71,6 +78,7 @@ export const sampleColonies: Colony[] = [
         oil: 1.3,
         temperature: -15
       }
-    }
+    },
+    colonyLevel: 'Colony'
   }
 ];

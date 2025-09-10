@@ -1,8 +1,13 @@
+import type { Quaternion } from "three";
+
 export interface Colony {
+    id: string;
     name: string;
     residents: number;
     color: string;
     planet: Planet;
+    colonyLevel: ColonyLevel;
+    colonyFleet?: Fleet[];
 }
 
 export interface Planet {
@@ -26,3 +31,36 @@ export interface ResourceStation { // Resource Outposts like drilling stations, 
     position: { x: number, y: number }
     resourceType: keyof NaturalResources;
 }
+
+export type ColonyLevel = 'Colony' | 'Settlement' | 'Township' | 'Metropolis' | 'Starport Hub';
+
+export interface Fleet {
+    id: string;
+    label?: string;
+    ships: SpaceShip[];
+    count?: number;
+    position: { x: number, y: number, z: number };
+    velocity: { x: number, y: number, z: number };
+    rotation: Quaternion;
+    state: FleetState;
+    tactic: FleetTactic;
+    order?: FleetOrder;
+    leaderId?: string;           // optional leader ship id for formations
+    hpPool?: number;   
+}
+
+export interface FleetOrder {
+    type: 'Move' | 'Attack' | 'Patrol' | 'Hold' | 'Retreat' | 'Dock';
+    targetId?: string; // id of planet/colony/fleet
+    targetPos?: { x: number, y: number, z?: number };
+    timestamp?: number;
+}
+
+export interface SpaceShip {
+    label: string;
+    model: string;
+}
+
+export type FleetState = 'Idle' | 'Moving' | 'Attacking' | 'Retreating' | 'Patrolling' | 'Docking';
+
+export type FleetTactic = 'Offensive' | 'Defensive' | 'Skirmish' | 'Kite' | 'Hold';

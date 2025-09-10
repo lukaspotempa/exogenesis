@@ -3,8 +3,8 @@ import type { Colony } from '../types/Types'
 
 type Props = {
   colonies: Colony[]
-  activeColony: string | null
-  setActiveColony: (name: string) => void
+  activeColony: Colony
+  setActiveColony: (colony: Colony) => void
 }
 
 export default function ColonyList({ colonies, activeColony, setActiveColony }: Props) {
@@ -21,12 +21,12 @@ export default function ColonyList({ colonies, activeColony, setActiveColony }: 
         </thead>
         <tbody>
           {colonies.map((colony, idx) => {
-            const isActive = activeColony === colony.name
+            const isActive = activeColony.id === colony.id
             return (
               <tr
-                key={colony.name}
-                onClick={() => setActiveColony(colony.name)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveColony(colony.name); }}
+                key={colony.id}
+                onClick={() => setActiveColony(colony)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveColony(colony); }}
                 role="button"
                 tabIndex={0}
                 aria-current={isActive ? 'true' : undefined}
