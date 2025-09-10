@@ -36,13 +36,12 @@ export function ColonyBaseSmall({ colonyColor }: Props): React.JSX.Element {
 
   return (
     <group dispose={null}>
-      {/* The actual base model */}
       <mesh 
         geometry={nodes.Base_Large.geometry} 
         receiveShadow
         castShadow
         material={materials.Atlas}
-        scale={[3, 3, 3]}
+        scale={5}
       >
       </mesh>
     </group>

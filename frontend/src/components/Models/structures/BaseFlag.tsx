@@ -27,7 +27,7 @@ export function BaseFlag({ colonyColor }: Props): React.JSX.Element {
     console.error('Base model nodes/materials not available, rendering fallback');
     return (
       <group dispose={null}>
-        <mesh scale={0.1}>
+        <mesh scale={0.5}>
           <boxGeometry args={[1, 0.5, 1]} />
           <meshStandardMaterial color={colonyColor || '#888888'} />
         </mesh>
@@ -40,7 +40,7 @@ export function BaseFlag({ colonyColor }: Props): React.JSX.Element {
         return (
             <group dispose={null}>
                 <mesh 
-                    scale={0.1}
+                    scale={0.5}
                 >
                     <boxGeometry args={[1, 2, 0.1]} />
                     <meshStandardMaterial color={colonyColor || '#ff0000'} />
@@ -52,7 +52,7 @@ export function BaseFlag({ colonyColor }: Props): React.JSX.Element {
     return (
         <group 
             dispose={null}
-            scale={[1, 1, 1]}
+            scale={1}
         >
             {/* Center the model by offsetting it by its bounding box center */}
             <group>

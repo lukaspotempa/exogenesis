@@ -1,31 +1,49 @@
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import './styles.css'
+import './assets/UI.css'
 import { MainScene } from './components/Scene/MainScene'
-import { Suspense, useEffect } from 'react'
+import ColonyList from './components/ColonyList'
+import { Suspense, useEffect, useState } from 'react'
 import { coloniesStore } from './store/coloniesStore'
 import { sampleColonies } from './data/sampleData'
 
 function App() {
+  const [colonies, setColonies] = useState(() => coloniesStore.getColonies() ?? []);
+  const [activeColony, setActiveColony] = useState<string | null>(null);
+
   useEffect(() => {
-    // Initialize the store with sample data
+    // initialize store and local state
     coloniesStore.setColonies(sampleColonies);
+    setColonies(sampleColonies);
+    // set a sensible default active colony
+    setActiveColony(sampleColonies?.[0]?.name ?? null);
   }, []);
 
-  return (
-    <div style={{ width: '100vw', height: '100vh', background: 'black' }}>
-      <Canvas shadows camera={{ position: [0, 0, 50], fov: 45 }}>
-        <Suspense fallback={null}>
-          <MainScene />
+  // keep active when colonies are populated later
+  useEffect(() => {
+    if (!activeColony && colonies.length) setActiveColony(colonies[0].name);
+  }, [colonies, activeColony]);
 
-          {/* Controls */}
-          <OrbitControls
-            enablePan={true}
-            enableZoom={true}
-            enableRotate={true}
-          />
-        </Suspense>
-      </Canvas>
+  return (
+    <div>
+      <div style={{ width: '100vw', height: '100vh', background: 'black' }}>
+        <div className="UI">
+          <ColonyList colonies={colonies} activeColony={activeColony} setActiveColony={setActiveColony} />
+        </div>
+        <Canvas shadows camera={{ position: [0, 0, 50], fov: 45 }}>
+          <Suspense fallback={null}>
+            <MainScene />
+
+            {/* Controls */}
+            <OrbitControls
+              enablePan={true}
+              enableZoom={true}
+              enableRotate={true}
+            />
+          </Suspense>
+        </Canvas>
+      </div>
     </div>
   )
 }

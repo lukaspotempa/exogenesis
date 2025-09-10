@@ -1,0 +1,20 @@
+.UI {
+    position: fixed;
+    top: 2vh;
+    right: 5%;
+    pointer-events: auto;
+    /* make sure the UI sits above the three.js canvas */
+    z-index: 9999;
+}
+
+/* ...existing code... */
+.ColonyList {
+    width: 20vw;
+    position: relative;
+}
+
+/* ensure buttons inside the UI are clickable and show a pointer */
+.UI button {
+    pointer-events: auto;
+    cursor: pointer;
+}

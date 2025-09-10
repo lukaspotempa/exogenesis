@@ -14,6 +14,7 @@ interface StructureConfig {
   component: React.ComponentType<{ colonyColor?: string }>;
   position: THREE.Vector3; // Local position relative to basePosition
   rotation?: THREE.Euler; // Local rotation relative to baseOrientation
+  scale?: number;
 }
 
 interface PlacedStructure {
@@ -48,7 +49,7 @@ export function Colony({ planet, colonyColor }: ColonyProps): React.JSX.Element 
     },
     {
       component: BaseFlag,
-      position: new THREE.Vector3(0.02, 0, 0.5),
+      position: new THREE.Vector3(0, 0, 1),
     }
   ], []);
 
