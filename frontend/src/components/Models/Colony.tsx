@@ -1,45 +1,144 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
 import type { Planet as PlanetType } from '../../types/Types';
 import { PlanetA } from './planets/PlanetA';
 import { ColonyBaseSmall } from './structures/ColonyBaseSmall';
 import { BaseFlag } from './structures/BaseFlag';
 
-interface PlanetProps {
+interface ColonyProps {
   planet: PlanetType;
   colonyColor?: string;
 }
 
 interface StructureConfig {
   component: React.ComponentType<{ colonyColor?: string }>;
-  // position and rotation are local, relative to the base position/orientation
   position: THREE.Vector3; // Local position relative to basePosition
-  rotation?: THREE.Euler; // Local rotation relative to baseOrientation (applied after aligning to surface normal)
+  rotation?: THREE.Euler; // Local rotation relative to baseOrientation
 }
 
-export function Planet({ planet, colonyColor }: PlanetProps): React.JSX.Element {
+interface PlacedStructure {
+  component: React.ComponentType<{ colonyColor?: string }>;
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+}
+
+interface RaycastResult {
+  point: THREE.Vector3;
+  normal: THREE.Vector3;
+}
+
+// Constants
+const COORDINATE_SCALE = 50;
+const BASE_OFFSET = 0.01;
+const STRUCTURE_Y_OFFSET = -0.02;
+const RAY_ORIGIN_MULTIPLIER = 3;
+
+export function Colony({ planet, colonyColor }: ColonyProps): React.JSX.Element {
   const { position, scale, rot, planetModelName, planetMainBase } = planet;
   const planetGroupRef = useRef<THREE.Group | null>(null);
   const [basePosition, setBasePosition] = useState<THREE.Vector3 | null>(null);
   const [baseRotation, setBaseRotation] = useState<THREE.Quaternion | null>(null);
-  const [placedStructures, setPlacedStructures] = useState<Array<{
-    component: React.ComponentType<{ colonyColor?: string }>;
-    position: THREE.Vector3;
-    quaternion: THREE.Quaternion;
-  }>>([]);
+  const [placedStructures, setPlacedStructures] = useState<PlacedStructure[]>([]);
 
   // Define structures to be placed at the colony site.
-  // position/rotation are local relative to the base (tangent plane of the surface at base).
-  const colonyObjects: StructureConfig[] = useMemo<StructureConfig[]>(() => [
+  const colonyObjects: StructureConfig[] = useMemo(() => [
     {
       component: ColonyBaseSmall,
-      position: new THREE.Vector3(0, 0, 0), // Base at the exact surface position
+      position: new THREE.Vector3(0, 0, 0),
     },
     {
       component: BaseFlag,
       position: new THREE.Vector3(0.02, 0, 0.5),
     }
   ], []);
+
+  // Utility function to convert 2D coordinates to spherical direction
+  const calculateSphericalDirection = useCallback((x: number, y: number): THREE.Vector3 => {
+    const longitude = (x / COORDINATE_SCALE) * Math.PI * 2;
+    const latitude = (y / COORDINATE_SCALE) * Math.PI;
+    
+    return new THREE.Vector3(
+      Math.cos(latitude) * Math.cos(longitude),
+      Math.sin(latitude),
+      Math.cos(latitude) * Math.sin(longitude)
+    ).normalize();
+  }, []);
+
+  // Utility function to setup planet mesh for raycasting
+  const setupPlanetMesh = useCallback((planetGroup: THREE.Group): THREE.Mesh | null => {
+    const planetMesh = planetGroup.getObjectByName('planet-surface') as THREE.Mesh;
+    if (!planetMesh) return null;
+
+    planetGroup.updateWorldMatrix(true, true);
+    planetMesh.updateWorldMatrix(true, true);
+    
+    const geometry = planetMesh.geometry as THREE.BufferGeometry;
+    if (geometry?.boundingSphere === null) {
+      geometry.computeBoundingSphere();
+    }
+    
+    return planetMesh;
+  }, []);
+
+  // Utility function to perform raycast from outside planet to surface
+  const raycastToSurface = useCallback((
+    planetGroup: THREE.Group,
+    planetMesh: THREE.Mesh,
+    direction: THREE.Vector3
+  ): RaycastResult | null => {
+    const planetCenter = new THREE.Vector3();
+    planetGroup.getWorldPosition(planetCenter);
+
+    const geometry = planetMesh.geometry as THREE.BufferGeometry;
+    const boundingSphere = geometry?.boundingSphere;
+    const radius = boundingSphere 
+      ? boundingSphere.radius * Math.max(planetGroup.scale.x, planetGroup.scale.y, planetGroup.scale.z)
+      : 1;
+
+    const rayOrigin = planetCenter.clone().add(
+      direction.clone().multiplyScalar(radius * RAY_ORIGIN_MULTIPLIER + 1)
+    );
+    const rayDirection = direction.clone().negate();
+
+    const raycaster = new THREE.Raycaster(rayOrigin, rayDirection);
+    const intersects = raycaster.intersectObject(planetMesh, true);
+
+    if (intersects.length === 0) return null;
+
+    const intersection = intersects[0];
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(
+      (intersection.object as THREE.Mesh).matrixWorld
+    );
+    
+    const surfaceNormal = intersection.face
+      ? intersection.face.normal.clone().applyMatrix3(normalMatrix).normalize()
+      : direction.clone().negate();
+
+    return {
+      point: intersection.point.clone(),
+      normal: surfaceNormal
+    };
+  }, []);
+
+  // Utility function to transform local offset to world space
+  const transformOffsetToWorldSpace = useCallback((
+    localOffset: THREE.Vector3,
+    basePosition: THREE.Vector3,
+    baseRotation: THREE.Quaternion
+  ): THREE.Vector3 => {
+    const worldOffset = localOffset.clone().applyQuaternion(baseRotation);
+    return basePosition.clone().add(worldOffset);
+  }, []);
+
+  // Utility function to combine rotations
+  const combineRotations = useCallback((
+    baseRotation: THREE.Quaternion,
+    additionalRotation?: THREE.Euler
+  ): THREE.Quaternion => {
+    if (!additionalRotation) return baseRotation;
+    const additionalQuaternion = new THREE.Quaternion().setFromEuler(additionalRotation);
+    return baseRotation.clone().multiply(additionalQuaternion);
+  }, []);
 
   const renderPlanetModel = () => {
     switch (planetModelName) {
@@ -51,170 +150,85 @@ export function Planet({ planet, colonyColor }: PlanetProps): React.JSX.Element 
     }
   };
 
+  // Calculate base position and rotation on planet surface
   useEffect(() => {
     if (!planetGroupRef.current) return;
-    console.log("Planet Group Ref: ", planetGroupRef)
 
-    // Convert 2D coordinates to spherical coordinates for direction
-    const longitude = (planetMainBase.x / 50) * Math.PI * 2; // Full rotation
-    const latitude = (planetMainBase.y / 50) * Math.PI; // Half rotation for latitude
-
-    // Create direction vector from planet center outward (local sphere direction)
-    const localDirection = new THREE.Vector3(
-      Math.cos(latitude) * Math.cos(longitude),
-      Math.sin(latitude),
-      Math.cos(latitude) * Math.sin(longitude)
-    ).normalize();
-
-    // Find the planet surface mesh for raycasting
-    const planetMesh = planetGroupRef.current.getObjectByName('planet-surface') as THREE.Mesh;
+    const planetGroup = planetGroupRef.current;
+    const planetMesh = setupPlanetMesh(planetGroup);
+    
     if (!planetMesh) {
-      // mesh not ready — try again shortly
       const timeout = setTimeout(() => setBasePosition(null), 100);
       return () => clearTimeout(timeout);
     }
 
-    // Ensure transforms / world matrices & bounds are current
-    planetGroupRef.current.updateWorldMatrix(true, true);
-    planetMesh.updateWorldMatrix(true, true);
-    // geometry is BufferGeometry for GLTF meshes
-    const geometry = planetMesh.geometry as THREE.BufferGeometry | undefined;
-    if (geometry && geometry.boundingSphere === null) {
-      geometry.computeBoundingSphere();
-    }
+    const direction = calculateSphericalDirection(planetMainBase.x, planetMainBase.y);
+    const raycastResult = raycastToSurface(planetGroup, planetMesh, direction);
 
-    // planet center in world space
-    const planetCenter = new THREE.Vector3();
-    planetGroupRef.current.getWorldPosition(planetCenter);
+    if (raycastResult) {
+      const basePos = raycastResult.point.add(raycastResult.normal.clone().multiplyScalar(BASE_OFFSET));
+      const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), raycastResult.normal);
 
-    // compute a safe radius to place the ray origin well outside the mesh
-    const bs = geometry ? geometry.boundingSphere : null;
-    const radius = bs ? bs.radius * Math.max(planetGroupRef.current.scale.x || 1, planetGroupRef.current.scale.y || 1, planetGroupRef.current.scale.z || 1) : 1;
-    const rayOrigin = planetCenter.clone().add(localDirection.clone().multiplyScalar(radius * 3 + 1)); // outside the planet
-    const rayDirection = localDirection.clone().negate(); // point toward planet center
-
-    /* DEBUG ARROWS
-    const arrow = new THREE.ArrowHelper(rayDirection, rayOrigin, radius * 2, 0xff0000);
-    (planetGroupRef.current.parent || planetGroupRef.current).add(arrow);*/
-
-    const raycaster = new THREE.Raycaster(rayOrigin, rayDirection);
-
-    // Use recursive=true in case the surface is nested under the named object
-    const intersects = raycaster.intersectObject(planetMesh, true);
-
-    if (intersects.length > 0) {
-      const intersection = intersects[0];
-
-      // convert face normal to world space
-      const normalMatrix = new THREE.Matrix3().getNormalMatrix((intersection.object as THREE.Mesh).matrixWorld);
-      const surfaceNormal = intersection.face
-        ? intersection.face.normal.clone().applyMatrix3(normalMatrix).normalize()
-        : localDirection.clone().negate();
-
-      const surfacePoint = intersection.point.clone();
-      const baseOffset = 0.01;
-      const computedBasePosition = surfacePoint.add(surfaceNormal.clone().multiplyScalar(baseOffset));
-
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), surfaceNormal);
-
-      setBasePosition(computedBasePosition);
-      setBaseRotation(quaternion);
+      setBasePosition(basePos);
+      setBaseRotation(baseQuat);
     } else {
       console.warn('Raycast missed planet surface — check mesh, transforms and material.side (use DoubleSide on model)');
     }
-  }, [planetMainBase.x, planetMainBase.y]);
+  }, [planetMainBase.x, planetMainBase.y, calculateSphericalDirection, setupPlanetMesh, raycastToSurface]);
 
-  // Helper function to transform local offset to world space
-  const transformOffsetToWorldSpace = (
-    localOffset: THREE.Vector3,
-    basePosition: THREE.Vector3,
-    baseRotation: THREE.Quaternion
-  ): THREE.Vector3 => {
-    const worldOffset = localOffset.clone().applyQuaternion(baseRotation);
-    return basePosition.clone().add(worldOffset);
-  };
-
-  // Helper function to combine rotations
-  const combineRotations = (
-    baseRotation: THREE.Quaternion,
-    additionalRotation?: THREE.Euler
-  ): THREE.Quaternion => {
-    if (!additionalRotation) return baseRotation;
-
-    const additionalQuaternion = new THREE.Quaternion().setFromEuler(additionalRotation);
-    return baseRotation.clone().multiply(additionalQuaternion);
-  };
-
-  // When we have a basePosition and rotation, compute final positions/quaternions for each object
+  // Calculate positions for all colony structures
   useEffect(() => {
     if (!basePosition || !baseRotation || !planetGroupRef.current) return;
 
-    const planetMesh = planetGroupRef.current.getObjectByName('planet-surface') as THREE.Mesh;
+    const planetGroup = planetGroupRef.current;
+    const planetMesh = setupPlanetMesh(planetGroup);
+    
     if (!planetMesh) {
       console.warn('Planet surface mesh not ready for placing structures');
       return;
     }
 
     const planetCenter = new THREE.Vector3();
-    planetGroupRef.current.getWorldPosition(planetCenter);
-
-    const raycaster = new THREE.Raycaster();
-
-    const results: Array<{ component: React.ComponentType<{ colonyColor?: string }>; position: THREE.Vector3; quaternion: THREE.Quaternion }> = [];
+    planetGroup.getWorldPosition(planetCenter);
 
     const groupWorldQuat = new THREE.Quaternion();
-    planetGroupRef.current.getWorldQuaternion(groupWorldQuat);
+    planetGroup.getWorldQuaternion(groupWorldQuat);
+
+    const results: PlacedStructure[] = [];
 
     colonyObjects.forEach((obj) => {
-      // Compute approximate world-space target by applying base rotation to the object's local position
       const approxWorld = transformOffsetToWorldSpace(obj.position, basePosition, baseRotation);
-
-      // Direction from planet center through approxWorld
       const direction = approxWorld.clone().sub(planetCenter).normalize();
+      const raycastResult = raycastToSurface(planetGroup, planetMesh, direction);
 
-      const rayOrigin = planetCenter.clone().add(direction.clone().multiplyScalar(1000));
-      const rayDirection = direction.clone().negate();
-      raycaster.set(rayOrigin, rayDirection);
-
-      // Use recursive=true in case the surface mesh is nested under group nodes
-      const intersects = raycaster.intersectObject(planetMesh, true);
-
-      if (intersects.length > 0) {
-        const intersection = intersects[0];
-        const surfacePoint = intersection.point.clone();
-
-        // Convert the face normal to world space
-        let surfaceNormal = direction.clone();
-        if (intersection.face) {
-          const normalMatrix = new THREE.Matrix3().getNormalMatrix(planetMesh.matrixWorld);
-          surfaceNormal = intersection.face.normal.clone().applyMatrix3(normalMatrix).normalize();
-        }
-
-        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), surfaceNormal);
-
-        // Apply additional local rotation if provided
+      if (raycastResult) {
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), raycastResult.normal);
         const finalQuat = combineRotations(quat, obj.rotation);
-
-        // Convert finalQuat (world-space) into planet group's local quaternion
         const localQuat = groupWorldQuat.clone().invert().multiply(finalQuat);
 
-        // Convert the computed world-space surface point to the planet group's local space
-        const worldPos = surfacePoint.add(surfaceNormal.clone().multiplyScalar(0.01));
-        const localPos = planetGroupRef.current!.worldToLocal(worldPos.clone());
+        const worldPos = raycastResult.point.add(raycastResult.normal.clone().multiplyScalar(BASE_OFFSET));
+        const localPos = planetGroup.worldToLocal(worldPos.clone());
 
-        results.push({ component: obj.component, position: localPos, quaternion: localQuat });
+        results.push({ 
+          component: obj.component, 
+          position: localPos, 
+          quaternion: localQuat 
+        });
       } else {
-        console.warn('Raycast failed for object, using fallback approxWorld position', obj);
+        console.warn('Raycast failed for object, using fallback position', obj);
       }
     });
 
     setPlacedStructures(results);
-  }, [basePosition, baseRotation, colonyObjects]);
-
-  // Debug logging
-  useEffect(() => {
-    console.log('Planet render - Base coordinates:', planetMainBase, 'Position:', basePosition, 'Rotation:', baseRotation);
-  }, [planetMainBase, basePosition, baseRotation]);
+  }, [
+    basePosition, 
+    baseRotation, 
+    colonyObjects, 
+    setupPlanetMesh, 
+    raycastToSurface, 
+    transformOffsetToWorldSpace, 
+    combineRotations
+  ]);
 
   return (
     <group
@@ -226,12 +240,15 @@ export function Planet({ planet, colonyColor }: PlanetProps): React.JSX.Element 
       {renderPlanetModel()}
 
       {/* Colony Structures placed via raycast */}
-      {placedStructures.map((s, index) => {
-        const Component = s.component;
-        const q = s.quaternion;
-        const p = s.position;
+      {placedStructures.map((structure, index) => {
+        const Component = structure.component;
+        const { position: p, quaternion: q } = structure;
         return (
-          <group key={index} position={[p.x, p.y - 0.02, p.z]} quaternion={[q.x, q.y, q.z, q.w]}>
+          <group 
+            key={index} 
+            position={[p.x, p.y + STRUCTURE_Y_OFFSET, p.z]} 
+            quaternion={[q.x, q.y, q.z, q.w]}
+          >
             <Component colonyColor={colonyColor} />
           </group>
         );

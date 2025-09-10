@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Colony } from '../../types/Types';
 import { coloniesStore } from '../../store/coloniesStore';
-import { Planet } from '../Models/Colony';
+import { Colony as ColonyComponent } from '../Models/Colony';
 //import { Ship1 } from '../Models/Ship_1';
 
 export function MainScene(): React.JSX.Element {
@@ -23,7 +23,7 @@ export function MainScene(): React.JSX.Element {
     <group>
       {/* Render all colony planets */}
       {colonies.map((colony, index) => (
-        <Planet 
+        <ColonyComponent 
           key={`${colony.name}-${index}`}
           planet={colony.planet}
           colonyColor={colony.color}
