@@ -36,8 +36,8 @@ export type ColonyLevel = 'Colony' | 'Settlement' | 'Township' | 'Metropolis' | 
 
 export interface Fleet {
     id: string;
+    type: 'Attacker' | 'Flanker' | 'Fighter' | 'Bomber';
     label?: string;
-    ships: SpaceShip[];
     count?: number;
     position: { x: number, y: number, z: number };
     velocity: { x: number, y: number, z: number };

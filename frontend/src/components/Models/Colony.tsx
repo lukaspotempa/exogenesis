@@ -1,9 +1,10 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
-import type { Colony as ColonyType } from '../../types/Types';
+import type { Colony as ColonyType, Fleet } from '../../types/Types';
 import { PlanetA } from './planets/PlanetA';
 import { ColonyBaseSmall } from './structures/ColonyBaseSmall';
 import { BaseFlag } from './structures/BaseFlag';
+import { FleetAttacker } from '../Scene/fleet/FleetAttacker';
 
 interface ColonyProps {
   colony: ColonyType;
@@ -20,6 +21,18 @@ interface PlacedStructure {
   component: React.ComponentType<{ colonyColor?: string }>;
   position: THREE.Vector3;
   quaternion: THREE.Quaternion;
+}
+
+interface FleetComponentProps {
+  colonyColor?: string;
+  fleetProp: Fleet;
+  onUpdate?: (fleet: Fleet) => void;
+}
+
+interface PlacedFleet {
+  component: React.ComponentType<FleetComponentProps>;
+  localPosition: THREE.Vector3;
+  fleetProp: Fleet;
 }
 
 interface RaycastResult {
@@ -40,6 +53,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   const [basePosition, setBasePosition] = useState<THREE.Vector3 | null>(null);
   const [baseRotation, setBaseRotation] = useState<THREE.Quaternion | null>(null);
   const [placedStructures, setPlacedStructures] = useState<PlacedStructure[]>([]);
+  const [placedFleets, setPlacedFleets] = useState<PlacedFleet[]>([]);
 
   // Define structures to be placed at the colony site.
   const colonyObjects: StructureConfig[] = useMemo(() => [
@@ -151,6 +165,14 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     }
   };
 
+  // Map fleet types to components. Add more mappings here as new fleet components are created.
+  const fleetComponentMap = useMemo(() => ({
+    Attacker: FleetAttacker,
+    // Flanker: FleetFlanker,
+    // Fighter: FleetFighter,
+    // Bomber: FleetBomber,
+  } as Record<string, React.ComponentType<FleetComponentProps>>), []);
+
   // Calculate base position and rotation on planet surface
   useEffect(() => {
     if (!planetGroupRef.current) return;
@@ -231,6 +253,36 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     combineRotations
   ]);
 
+  // Calculate local positions for fleets and select the correct component for each fleet type
+  useEffect(() => {
+    if (!planetGroupRef.current) return;
+    if (!colony.colonyFleet || colony.colonyFleet.length === 0) {
+      setPlacedFleets([]);
+      return;
+    }
+
+    const results: PlacedFleet[] = [];
+
+    colony.colonyFleet.forEach((fleet) => {
+      const comp = fleetComponentMap[fleet.type] ?? FleetAttacker;
+
+      // Convert fleet world position to local space of the planet group so the fleet component
+      // can be rendered as a child of the planet and follow its transform.
+      //const worldPos = new THREE.Vector3(fleet.position.x, fleet.position.y, fleet.position.z);
+      if(!basePosition) return;
+      const away = basePosition!.clone().sub(new THREE.Vector3(position.x, position.y, position.z)).normalize();
+      const localPos = basePosition!.add(away).addScalar(1);
+      
+      // Pass a copy of the fleet with a zeroed position — the parent <group> will provide the base
+      // transform and the fleet component may then animate relative to that origin.
+      const localFleetProp: Fleet = { ...fleet, position: { x: 0, y: 0, z: 0 } };
+
+      results.push({ component: comp, localPosition: localPos.clone(), fleetProp: localFleetProp });
+    });
+
+    setPlacedFleets(results);
+  }, [basePosition, colony.colonyFleet, fleetComponentMap, position.x, position.y, position.z]);
+
   return (
     <group
       ref={planetGroupRef}
@@ -251,6 +303,19 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
             quaternion={[q.x, q.y, q.z, q.w]}
           >
             <Component colonyColor={colonyColor} />
+          </group>
+        );
+      })}
+
+      {/* Fleets rendered via mapped components */}
+      {placedFleets.map((pf, idx) => {
+        const FleetComp = pf.component;
+        return (
+          <group 
+            key={`fleet-${pf.fleetProp.id}-${idx}`} 
+            position={[pf.localPosition.x, pf.localPosition.y, pf.localPosition.z]}
+            quaternion={[0, 0, 0, 0]}>
+            <FleetComp colonyColor={colonyColor} fleetProp={pf.fleetProp} onUpdate={() => { /* noop for now */ }} />
           </group>
         );
       })}

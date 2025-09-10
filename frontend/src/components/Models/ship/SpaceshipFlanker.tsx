@@ -1,6 +1,10 @@
 import { useGLTF } from '@react-three/drei'
 import type { GLTF } from 'three-stdlib'
-import type { Mesh, MeshStandardMaterial } from 'three'
+import type { MeshStandardMaterial, Mesh } from 'three'
+
+interface ShipProps {
+  colonyColor: string;
+}
 
 interface TrackGLTF extends GLTF {
   nodes: {
@@ -15,14 +19,16 @@ interface TrackGLTF extends GLTF {
   }
 }
 
-export function SpaceshipFlanker(): React.JSX.Element {
+export function SpaceshipFlanker({ colonyColor }: ShipProps): React.JSX.Element {
   const { nodes: n, materials: m } = useGLTF('/models/fleet/Spaceship_Flanker.glb') as unknown as TrackGLTF
 
   return (
-    <group dispose={null} scale={0.01}>
-      <mesh geometry={n.Lo_poly_Spaceship_05_by_Liz_Reddington_1.geometry} material={m.lambert2SG} />
-      <mesh geometry={n.Lo_poly_Spaceship_05_by_Liz_Reddington_1_1.geometry} material={m.lambert4SG} />
-      <mesh geometry={n.Lo_poly_Spaceship_05_by_Liz_Reddington_1_2.geometry} material={m.lambert3SG} />
+    <group dispose={null} scale={0.001}>
+      <mesh geometry={n.Lo_poly_Spaceship_05_by_Liz_Reddington_1.geometry} material={m.lambert4SG} />
+      <mesh geometry={n.Lo_poly_Spaceship_05_by_Liz_Reddington_1_1.geometry}>
+        <meshStandardMaterial color={colonyColor} />
+      </mesh>
+      <mesh geometry={n.Lo_poly_Spaceship_05_by_Liz_Reddington_1_2.geometry} material={m.lambert2SG} />
     </group>
   )
 }

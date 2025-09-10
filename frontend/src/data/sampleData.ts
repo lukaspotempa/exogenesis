@@ -23,10 +23,10 @@ export const sampleColonies: Colony[] = [
     colonyLevel: 'Colony',
     colonyFleet: [{
       id: '400',
-      ships: [],
+      type: 'Attacker',
       position: {
-        x: 5,
-        y: 10,
+        x: 10,
+        y: 0,
         z: 0
       },
       velocity: {
@@ -36,7 +36,8 @@ export const sampleColonies: Colony[] = [
       },
       rotation: new Quaternion,
       state: 'Idle',
-      tactic: 'Offensive'
+      tactic: 'Offensive',
+      count: 3
     }]
   },
   {

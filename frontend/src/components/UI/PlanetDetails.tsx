@@ -1,4 +1,4 @@
-import type { Colony } from '../types/Types'
+import type { Colony } from '../../types/Types'
 import ResourceBar from './ResourceBar'
 
 type Props = {
@@ -50,9 +50,9 @@ export default function PlanetDetails({ activeColony }: Props) {
                             <div className="text-xs text-white/70">Temperature °C</div>
                             <ResourceBar 
                             value={resources?.temperature ?? null} 
-                            min={10}
-                            center={25}
-                            max={40}
+                            min={0}
+                            center={15}
+                            max={30}
                             ariaLabel="Water amount" 
                             color="yellow"/>
                         </div>

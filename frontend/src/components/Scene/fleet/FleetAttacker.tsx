@@ -1,10 +1,9 @@
 import { useGLTF } from '@react-three/drei';
 import type { Fleet } from '../../../types/Types';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, type RefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
-import type { MutableRefObject } from 'react';
 import type { Group } from 'three';
-import { SpaceshipFlanker } from '../ship/SpaceshipFlanker';
+import { SpaceshipFlanker } from '../../Models/ship/SpaceshipFlanker';
 
 
 interface FleetProps {
@@ -30,7 +29,7 @@ interface FleetProps {
 export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps): React.JSX.Element {
     
     // Keep a mutable ref to the fleet for local animation and diffs
-    const fleetRef = useRef<Fleet>(fleetProp) as MutableRefObject<Fleet>;
+    const fleetRef = useRef<Fleet>(fleetProp) as RefObject<Fleet>;
     const groupRef = useRef<Group | null>(null);
 
     // Ensure ref stays in sync if parent replaces fleetProp reference
@@ -64,38 +63,19 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
       }
     });
 
-    const count = fleetProp.count ?? fleetProp.ships?.length ?? 1;
-    const spacing = 0.2; // spacing between ships in formation
+    const count = fleetProp.count ?? 1;
+    const spacing = 0.5; // spacing between ships in formation
 
     return (
       <group ref={groupRef} dispose={null}>
-        <mesh name="planet-surface">
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshStandardMaterial color="#4a4a4a" />
-        </mesh>
-        {colonyColor && (
-          <mesh 
-            scale={1.01} 
-            name="colony-overlay"
-            raycast={() => null} // Disable raycasting for this mesh
-          >
-            <sphereGeometry args={[1, 32, 32]} />
-            <meshStandardMaterial 
-              color={colonyColor} 
-              transparent 
-              opacity={0.2}
-              roughness={1}
-            />
-          </mesh>
-        )}
-
+      
         {/* Render spaceship models in a simple formation centered on fleet */}
         {Array.from({ length: count }).map((_, i) => {
           const offsetX = (i - (count - 1) / 2) * spacing;
-          const offsetZ = Math.abs(i - (count - 1) / 2) * 0.25; // slight depth spread
+          const offsetZ = Math.abs(i - (count - 1) / 2) * - spacing; // slight depth spread
           return (
             <group key={`ship-${i}`} position={[offsetX, 0, offsetZ]}>
-              <SpaceshipFlanker />
+              <SpaceshipFlanker colonyColor={colonyColor ?? '#FFFFFF'} />
             </group>
           );
         })}

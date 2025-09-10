@@ -1,5 +1,5 @@
 import React from 'react'
-import type { Colony } from '../types/Types'
+import type { Colony } from '../../types/Types'
 
 type Props = {
   colonies: Colony[]
