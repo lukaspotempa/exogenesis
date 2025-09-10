@@ -1,28 +1,122 @@
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import './styles.css'
 import './assets/UI.css'
 import { MainScene } from './components/Scene/MainScene'
 import ColonyList from './components/ColonyList'
 import PlanetDetails from './components/PlanetDetails'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
+import * as THREE from 'three'
 import { coloniesStore } from './store/coloniesStore'
 import { sampleColonies } from './data/sampleData'
 import type { Colony } from './types/Types'
 
+interface ControlsLike {
+  target: THREE.Vector3;
+  update: () => void;
+}
+
+function CameraController({
+  position = [0, 0, 50] as [number, number, number],
+  lookAt = [0, 0, 0] as [number, number, number],
+  controlsRef,
+}: {
+  position?: [number, number, number];
+  lookAt?: [number, number, number];
+  controlsRef?: React.RefObject<ControlsLike | null>;
+}) {
+  const { camera } = useThree();
+
+  const animRef = useRef({
+    running: false,
+    startTime: 0,
+    duration: 1000,
+    startPos: new THREE.Vector3(),
+    targetPos: new THREE.Vector3(),
+    startLookAt: new THREE.Vector3(),
+    targetLookAt: new THREE.Vector3(),
+  });
+
+  // easing fn
+  const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+  const posKey = position.join(',');
+  const lookKey = lookAt.join(',');
+
+
+  useEffect(() => {
+    const now = performance.now();
+    const startPos = camera.position.clone();
+
+    let startLookAt = new THREE.Vector3();
+    const ctrl = controlsRef?.current ?? null;
+    if (ctrl && ctrl.target) {
+      startLookAt = ctrl.target.clone();
+    } else {
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      startLookAt = camera.position.clone().add(dir.multiplyScalar(10));
+    }
+
+    animRef.current.startPos.copy(startPos);
+    animRef.current.targetPos.set(position[0], position[1], position[2]);
+    animRef.current.startLookAt.copy(startLookAt);
+    animRef.current.targetLookAt.set(lookAt[0], lookAt[1], lookAt[2]);
+    animRef.current.startTime = now;
+    animRef.current.running = true;
+  }, [posKey, lookKey, position, lookAt, camera, controlsRef]);
+
+  useFrame(() => {
+    if (!animRef.current.running) return;
+    const now = performance.now();
+    const elapsed = now - animRef.current.startTime;
+    const tRaw = Math.min(1, elapsed / animRef.current.duration);
+    const t = easeInOutCubic(tRaw);
+
+    // lerp
+    camera.position.lerpVectors(animRef.current.startPos, animRef.current.targetPos, t);
+
+    const lookAtPoint = new THREE.Vector3().lerpVectors(animRef.current.startLookAt, animRef.current.targetLookAt, t);
+    camera.lookAt(lookAtPoint);
+
+    const ctrl = controlsRef?.current ?? null;
+    if (ctrl && ctrl.target) {
+      ctrl.target.copy(lookAtPoint);
+      if (typeof ctrl.update === 'function') ctrl.update();
+    }
+
+    if (tRaw >= 1) {
+      camera.position.copy(animRef.current.targetPos);
+      camera.lookAt(animRef.current.targetLookAt);
+      const ctrl = controlsRef?.current ?? null;
+      if (ctrl && ctrl.target) {
+        ctrl.target.copy(animRef.current.targetLookAt);
+        if (typeof ctrl.update === 'function') ctrl.update();
+      }
+      animRef.current.running = false;
+    }
+  });
+
+  return null;
+}
+
 function App() {
   const [colonies, setColonies] = useState(() => coloniesStore.getColonies() ?? []);
   const [activeColony, setActiveColony] = useState<Colony | null>(null);
+  const controlsRef = useRef<ControlsLike | null>(null);
+  const handleControlsRef = (instance: unknown) => {
+
+    if (instance && typeof instance === 'object') {
+      controlsRef.current = instance as ControlsLike;
+    }
+  };
 
   useEffect(() => {
-    // initialize store and local state
     coloniesStore.setColonies(sampleColonies);
     setColonies(sampleColonies);
-    // set a sensible default active colony
     setActiveColony(sampleColonies?.[0] ?? null);
   }, []);
 
-  // keep active when colonies are populated later
   useEffect(() => {
     if (!activeColony && colonies.length) setActiveColony(colonies[0]);
   }, [colonies, activeColony]);
@@ -38,12 +132,20 @@ function App() {
             <PlanetDetails activeColony={activeColony!} setActiveColony={setActiveColony} />
           </div>
         </div>
-        <Canvas shadows camera={{ position: [0, 0, 50], fov: 45 }}>
+        <Canvas shadows>
           <Suspense fallback={null}>
+            {/* compute camera target from active colony position */}
+            <CameraController
+              position={activeColony ? [activeColony.planet.position.x, activeColony.planet.position.y, activeColony.planet.position.z + 30] : [0, 0, 50]}
+              lookAt={activeColony ? [activeColony.planet.position.x, activeColony.planet.position.y, activeColony.planet.position.z] : [0, 0, 0]}
+              controlsRef={controlsRef}
+            />
+
             <MainScene />
 
             {/* Controls */}
             <OrbitControls
+              ref={handleControlsRef}
               enablePan={true}
               enableZoom={true}
               enableRotate={true}
