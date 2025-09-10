@@ -47,6 +47,10 @@ export interface Fleet {
     order?: FleetOrder;
     leaderId?: string;           // optional leader ship id for formations
     hpPool?: number;   
+    // Optional attack target and attacking flag. `target.position` is a world-space coordinate
+    // the fleet will fire at. `isAttacking` controls whether the fleet should emit projectiles.
+    target?: { id?: string; position?: { x: number; y: number; z?: number } };
+    isAttacking?: boolean;
 }
 
 export interface FleetOrder {

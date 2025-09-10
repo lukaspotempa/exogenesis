@@ -37,7 +37,13 @@ export const sampleColonies: Colony[] = [
       rotation: new Quaternion,
       state: 'Idle',
       tactic: 'Offensive',
-      count: 3
+      count: 3,
+      isAttacking: false,
+      target: {position: {x: 0, y: 0, z: 0}},
+      order: {
+        type: 'Move',
+        targetPos: { x: 50, y: 0, z: 0}
+      }
     }]
   },
   {
