@@ -1,13 +1,12 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
-import type { Planet as PlanetType } from '../../types/Types';
+import type { Colony as ColonyType } from '../../types/Types';
 import { PlanetA } from './planets/PlanetA';
 import { ColonyBaseSmall } from './structures/ColonyBaseSmall';
 import { BaseFlag } from './structures/BaseFlag';
 
 interface ColonyProps {
-  planet: PlanetType;
-  colonyColor?: string;
+  colony: ColonyType;
 }
 
 interface StructureConfig {
@@ -34,8 +33,9 @@ const BASE_OFFSET = 0.01;
 const STRUCTURE_Y_OFFSET = -0.02;
 const RAY_ORIGIN_MULTIPLIER = 3;
 
-export function Colony({ planet, colonyColor }: ColonyProps): React.JSX.Element {
-  const { position, scale, rot, planetModelName, planetMainBase } = planet;
+export function Colony({ colony }: ColonyProps): React.JSX.Element {
+  const { position, scale, rot, planetModelName, planetMainBase } = colony.planet;
+  const colonyColor = colony.color;
   const planetGroupRef = useRef<THREE.Group | null>(null);
   const [basePosition, setBasePosition] = useState<THREE.Vector3 | null>(null);
   const [baseRotation, setBaseRotation] = useState<THREE.Quaternion | null>(null);

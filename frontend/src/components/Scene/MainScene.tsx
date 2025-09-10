@@ -23,10 +23,9 @@ export function MainScene(): React.JSX.Element {
     <group>
       {/* Render all colony planets */}
       {colonies.map((colony, index) => (
-        <ColonyComponent 
+        <ColonyComponent
           key={`${colony.name}-${index}`}
-          planet={colony.planet}
-          colonyColor={colony.color}
+          colony={colony}
         />
       ))}
 

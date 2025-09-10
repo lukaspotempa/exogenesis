@@ -1,3 +1,4 @@
+import { Quaternion } from 'three';
 import type { Colony } from '../types/Types';
 
 export const sampleColonies: Colony[] = [
@@ -20,6 +21,23 @@ export const sampleColonies: Colony[] = [
       },
     },
     colonyLevel: 'Colony',
+    colonyFleet: [{
+      id: '400',
+      ships: [],
+      position: {
+        x: 5,
+        y: 10,
+        z: 0
+      },
+      velocity: {
+        x: 0,
+        y: 0,
+        z: 0
+      },
+      rotation: new Quaternion,
+      state: 'Idle',
+      tactic: 'Offensive'
+    }]
   },
   {
     id: '2',
