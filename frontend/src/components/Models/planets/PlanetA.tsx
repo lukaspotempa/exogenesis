@@ -16,24 +16,10 @@ interface PlanetAProps {
 }
 
 export function PlanetA({ colonyColor }: PlanetAProps): React.JSX.Element {
-  try {
-    const { nodes, materials } = useGLTF('/models/earth/Jupiter-transformed.glb') as unknown as PlanetAGLTF;
+  const { nodes, materials } = useGLTF('/models/earth/Jupiter-transformed.glb') as unknown as PlanetAGLTF;
 
-    return (
-      <group dispose={null}>
-        <mesh 
-          geometry={nodes.Jupiter_Sphere.geometry} 
-          material={materials['Material.005']}
-          receiveShadow
-          castShadow
-          name="planet-surface"
-        />
-
-      </group>
-    );
-  } catch (error) {
-    console.error('Error loading planet model:', error);
-    // Fallback to a simple sphere if GLTF fails
+  if (!nodes || !materials) {
+    // Fallback to a simple sphere if GLTF isn't available yet
     return (
       <group dispose={null}>
         <mesh name="planet-surface">
@@ -58,6 +44,18 @@ export function PlanetA({ colonyColor }: PlanetAProps): React.JSX.Element {
       </group>
     );
   }
+
+  return (
+    <group dispose={null}>
+      <mesh 
+        geometry={nodes.Jupiter_Sphere.geometry} 
+        material={materials['Material.005']}
+        receiveShadow
+        castShadow
+        name="planet-surface"
+      />
+    </group>
+  );
 }
 
 useGLTF.preload('/models/earth/Jupiter-transformed.glb');

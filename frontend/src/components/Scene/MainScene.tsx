@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import type { Colony } from '../../types/Types';
 import { coloniesStore } from '../../store/coloniesStore';
-import { Planet } from '../Models/Planet';
-import { Ship1 } from '../Models/Ship_1';
+import { Planet } from '../Models/Colony';
+//import { Ship1 } from '../Models/Ship_1';
 
 export function MainScene(): React.JSX.Element {
   const [colonies, setColonies] = useState<Colony[]>([]);

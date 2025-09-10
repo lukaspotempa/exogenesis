@@ -17,7 +17,7 @@ interface TrackGLTF extends GLTF {
 
 export function Ship1(): React.JSX.Element {
   const { nodes: n, materials: m } = useGLTF('/models/earth/Spaceship-transformed.glb') as unknown as TrackGLTF
-  const config = { receiveShadow: true, castShadow: true, 'material-roughness': 1 }
+  //const config = { receiveShadow: true, castShadow: true, 'material-roughness': 1 }
 
 
   return (

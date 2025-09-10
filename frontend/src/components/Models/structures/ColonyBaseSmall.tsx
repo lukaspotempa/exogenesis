@@ -16,50 +16,37 @@ interface Props {
 }
 
 export function ColonyBaseSmall({ colonyColor }: Props): React.JSX.Element {
-  try {
-    const { nodes, materials } = useGLTF('/models/structures/Base_Small-transformed.glb') as unknown as BaseSmallGLTF;
-    return (
-      <group dispose={null}>
-        {/* The actual base model */}
-        <mesh 
-          geometry={nodes.Base_Large.geometry} 
-          receiveShadow
-          castShadow
-          material={materials.Atlas}
-          scale={[5, 5, 5]}
-        >
-          <meshStandardMaterial 
-            color={colonyColor || '#888888'} 
-            metalness={0.3}
-            roughness={0.7}
-          />
-        </mesh>
+  // call hook unconditionally to satisfy React Hook rules
+  const gltf = useGLTF('/models/structures/Base_Small-transformed.glb') as unknown as Partial<BaseSmallGLTF>;
+  const nodes = gltf.nodes as BaseSmallGLTF['nodes'] | undefined;
+  const materials = gltf.materials as BaseSmallGLTF['materials'] | undefined;
 
-        {colonyColor && (
-          <mesh scale={0.22}>
-            <sphereGeometry args={[1, 32, 32]} />
-            <meshStandardMaterial 
-              color={colonyColor} 
-              transparent 
-              opacity={0.2}
-              roughness={1}
-            />
-          </mesh>
-        )}
-      </group>
-    );
-  } catch (error) {
-    console.error('Error loading base model:', error);
-    // Render a simple fallback if model fails to load
+  // If model data isn't available yet, render a simple fallback
+  if (!nodes?.Base_Large || !materials?.Atlas) {
+    console.error('Base model nodes/materials not available, rendering fallback');
     return (
       <group dispose={null}>
-        <mesh scale={0.1}>
+        <mesh scale={0.2}>
           <boxGeometry args={[1, 0.5, 1]} />
           <meshStandardMaterial color={colonyColor || '#888888'} />
         </mesh>
       </group>
     );
   }
+
+  return (
+    <group dispose={null}>
+      {/* The actual base model */}
+      <mesh 
+        geometry={nodes.Base_Large.geometry} 
+        receiveShadow
+        castShadow
+        material={materials.Atlas}
+        scale={[3, 3, 3]}
+      >
+      </mesh>
+    </group>
+  );
 }
 
 useGLTF.preload('/models/structures/Base_Small-transformed.glb');
