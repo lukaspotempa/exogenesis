@@ -57,7 +57,6 @@ class Colony:
 
 	def increase_residents(self):
 		amount = 100
-		print(f"Colony {self.colony.id} increasing residents by {amount} (from {self.colony.residents})")
 		self.change_residents(amount)
 		self.last_residents_update = time.time()
 
@@ -84,7 +83,6 @@ class Colony:
 
 	def _mark_changed(self):
 		"""Mark this colony as having changes."""
-		print(f"Colony {self.colony.id} marked as changed")
 		self._has_changes = True
 
 	@classmethod

@@ -26,7 +26,6 @@ class ConnectionManager:
 
     async def broadcast_json(self, data: dict):
         """Broadcast JSON data to all connected clients."""
-        print(f"Broadcasting to {len(self.active_connections)} connections: {data}")
         disconnected = []
         for connection in list(self.active_connections):
             try:
