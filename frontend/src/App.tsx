@@ -100,6 +100,10 @@ function CameraController({
   return null;
 }
 
+function onMessage(ev: MessageEvent) {
+  console.log(ev);
+}
+
 function App() {
   const [colonies, setColonies] = useState(() => coloniesStore.getColonies() ?? []);
   const [activeColony, setActiveColony] = useState<Colony | null>(null);
@@ -110,6 +114,50 @@ function App() {
       controlsRef.current = instance as ControlsLike;
     }
   };
+  const websocketConnection = useRef<WebSocket>(null);
+
+  useEffect(() => {
+    const URL = import.meta.env.VITE_WEBSOCKET_URL;
+    if (!URL) return;
+    const socket = new WebSocket("ws://" + URL);
+
+    socket.onmessage = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (data && data.type === 'snapshot' && Array.isArray(data.colonies)) {
+          // update the global store and local state with snapshot
+          coloniesStore.setColonies(data.colonies);
+          setColonies(data.colonies as Colony[]);
+          setActiveColony((data.colonies as Colony[])?.[0] ?? null);
+          return;
+        }
+      } catch {
+        // not JSON, fall through
+      }
+      onMessage(ev);
+    };
+
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ initialConnection: true }));
+      const pingId = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ping' }));
+      }, 10000);
+
+      (socket as unknown as Record<string, unknown>)["__pingId"] = pingId;
+    });
+
+    websocketConnection.current = socket;
+
+  return () => {
+      try {
+        const pingId = (socket as unknown as Record<string, unknown>)["__pingId"] as number | undefined;
+        if (pingId) clearInterval(pingId);
+      } catch (e) {
+        console.error(e)
+      }
+      websocketConnection.current?.close();
+    };
+  }, [])
 
   useEffect(() => {
     coloniesStore.setColonies(sampleColonies);

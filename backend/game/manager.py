@@ -1,12 +1,9 @@
 from typing import List, Optional
 from fastapi import HTTPException
-import uuid
 import random
-import math
-import numpy as np
 import asyncio
-from ..models import ColonyModel, Planet
 from .colony import Colony
+import json
 
 
 class GameManager:
@@ -20,10 +17,14 @@ class GameManager:
 
     def initialise_game(self, count: int = 3) -> List[dict]:
         created = []
+        default_data = []
+        with open('config.json') as f:
+            default_data = json.load(f)
+        
         for i in range(count):
             payload = {
                 "name": f"Colony {len(self.colonies) + 1}",
-                "residents": int(random.uniform(10, 500)),
+                "residents": default_data["defaultResidents"],
                 "color": f"#{random.randint(0, 0xFFFFFF):06x}",
                 "colonyLevel": "Colony",
             }
@@ -35,8 +36,6 @@ class GameManager:
 
     async def start_game_loop(self, interval: float = 0.5) -> None:
         """Start a background task that calls tick() every `interval` seconds.
-
-        Safe to call multiple times; subsequent calls while running are no-ops.
         """
         if self._loop_task is not None and not self._loop_task.done():
             return

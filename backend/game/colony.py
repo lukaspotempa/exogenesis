@@ -3,7 +3,7 @@ import random
 import math
 import numpy as np
 from typing import Optional, List, Dict, Any
-from ..models import ColonyModel, Fleet
+from models import ColonyModel, Fleet
 
 class Colony:
 	"""Wrapper class for colony management"""
@@ -73,7 +73,7 @@ class Colony:
 					raise Exception('Failed to find non-overlapping planet position after many attempts')
 				pos = random_pos()
 
-			planet_models = ["PlanetA"]
+			planet_models = ["Planet_A"]
 
 			planet = {
 				"position": {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])},
