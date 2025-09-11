@@ -1,4 +1,5 @@
 from fastapi import WebSocket
+import json
 
 
 class ConnectionManager:
@@ -22,3 +23,18 @@ class ConnectionManager:
                 await connection.send_text(message)
             except Exception:
                 self.disconnect(connection)
+
+    async def broadcast_json(self, data: dict):
+        """Broadcast JSON data to all connected clients."""
+        print(f"Broadcasting to {len(self.active_connections)} connections: {data}")
+        disconnected = []
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(data)
+            except Exception as e:
+                print(f"Failed to send to connection: {e}")
+                disconnected.append(connection)
+        
+        # Clean up disconnected connections
+        for connection in disconnected:
+            self.disconnect(connection)

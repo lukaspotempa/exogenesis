@@ -117,27 +117,53 @@ function App() {
   const websocketConnection = useRef<WebSocket>(null);
 
   useEffect(() => {
-    const URL = import.meta.env.VITE_WEBSOCKET_URL;
+    const unsubscribe = coloniesStore.subscribe(() => {
+      const updatedColonies = coloniesStore.getColonies();
+      setColonies(updatedColonies);
+      
+      // Update active colony if it was changed - find the updated version in the new colonies list
+      if (activeColony) {
+        const updatedActiveColony = updatedColonies.find(colony => colony.id === activeColony.id);
+        if (updatedActiveColony) {
+          setActiveColony(updatedActiveColony);
+        }
+      }
+    });
+    
+    return unsubscribe;
+  }, [activeColony]);
+
+  useEffect(() => {
+    const URL = import.meta.env.VITE_WEBSOCKET_URL || "localhost:8000/ws";
+    console.log('WebSocket URL:', URL);
     if (!URL) return;
     const socket = new WebSocket("ws://" + URL);
 
     socket.onmessage = (ev: MessageEvent) => {
       try {
         const data = JSON.parse(ev.data);
+        
         if (data && data.type === 'snapshot' && Array.isArray(data.colonies)) {
-          // update the global store and local state with snapshot
+          // Initial snapshot - update the global store and local state
           coloniesStore.setColonies(data.colonies);
           setColonies(data.colonies as Colony[]);
           setActiveColony((data.colonies as Colony[])?.[0] ?? null);
           return;
         }
+        
+        if (data && data.type === 'update' && Array.isArray(data.changes)) {
+          // Delta update; only update changed colonies
+          coloniesStore.updateColonies(data.changes);
+          return;
+        }
       } catch {
-        // not JSON, fall through
+        // not JSON
       }
       onMessage(ev);
     };
 
     socket.addEventListener("open", () => {
+      console.log('WebSocket connected');
       socket.send(JSON.stringify({ initialConnection: true }));
       const pingId = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ping' }));
@@ -146,9 +172,17 @@ function App() {
       (socket as unknown as Record<string, unknown>)["__pingId"] = pingId;
     });
 
+    socket.addEventListener("close", () => {
+      console.log('WebSocket disconnected');
+    });
+
+    socket.addEventListener("error", (error) => {
+      console.error('WebSocket error:', error);
+    });
+
     websocketConnection.current = socket;
 
-  return () => {
+    return () => {
       try {
         const pingId = (socket as unknown as Record<string, unknown>)["__pingId"] as number | undefined;
         if (pingId) clearInterval(pingId);

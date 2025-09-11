@@ -9,13 +9,16 @@ from contextlib import asynccontextmanager
 connection_manager = ConnectionManager()
 game_manager = GameManager()
 
+# Connect the game manager to the connection manager for broadcasting updates
+game_manager.set_connection_manager(connection_manager)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # initialise seed colonies and start the periodic game loop
     game_manager.initialise_game()
-    # start the game loop with 200ms tick interval
-    await game_manager.start_game_loop(interval=0.2)
+    # start the game loop with 500ms tick interval
+    await game_manager.start_game_loop(interval=0.5)
 
     yield
 
@@ -44,12 +47,12 @@ def api_create_colony(payload: dict):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # register connection so it can be broadcast to later if needed
+
     await connection_manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_text()
-            # try to parse JSON payloads from the client
+
             try:
                 payload = json.loads(data)
             except Exception:
@@ -62,7 +65,6 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 await websocket.send_text("ack")
             except Exception:
-                # if send fails, disconnect
                 break
     except WebSocketDisconnect:
         pass

@@ -5,6 +5,7 @@ import asyncio
 from .colony import Colony
 import json
 
+colony_names = ["Aurora", "Mundane", "Mohawk", "Mohawk"]
 
 class GameManager:
     """Manages colonies in-memory."""
@@ -14,6 +15,11 @@ class GameManager:
 
     def __init__(self):
         self.colonies: List[Colony] = []
+        self._connection_manager = None
+
+    def set_connection_manager(self, connection_manager):
+        """Set the connection manager for broadcasting updates."""
+        self._connection_manager = connection_manager
 
     def initialise_game(self, count: int = 3) -> List[dict]:
         created = []
@@ -23,7 +29,7 @@ class GameManager:
         
         for i in range(count):
             payload = {
-                "name": f"Colony {len(self.colonies) + 1}",
+                "name": colony_names[len(self.colonies)],
                 "residents": default_data["defaultResidents"],
                 "color": f"#{random.randint(0, 0xFFFFFF):06x}",
                 "colonyLevel": "Colony",
@@ -66,11 +72,34 @@ class GameManager:
         self._loop_task = None
 
     def tick(self) -> None:
+        changes = []
         for c in self.colonies:
             try:
                 c.update()
-            except Exception:
+                # Check for changes after update
+                colony_changes = c.get_changes()
+                if colony_changes:
+                    changes.append(colony_changes)
+            except Exception as e:
+                print(f"Error updating colony: {e}")
                 continue
+        
+        # Broadcast changes to all connected clients
+        if changes and self._connection_manager:
+            asyncio.create_task(self._broadcast_changes(changes))
+
+    async def _broadcast_changes(self, changes: List[dict]) -> None:
+        """Broadcast colony changes to all connected clients."""
+        if not self._connection_manager:
+            return
+        
+        update_message = {
+            "type": "update",
+            "changes": changes,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+        await self._connection_manager.broadcast_json(update_message)
 
     def list_colonies(self) -> List[dict]:
         return [c.to_dict() for c in self.colonies]

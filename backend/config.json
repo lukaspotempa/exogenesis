@@ -1,3 +1,4 @@
 {
-    "defaultResidents": 100
+    "defaultResidents": 100,
+    "resident_update_interval": 5
 }

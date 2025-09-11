@@ -4,12 +4,29 @@ import math
 import numpy as np
 from typing import Optional, List, Dict, Any
 from models import ColonyModel, Fleet
+import time
+from pathlib import Path
+import json
+
+
+_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
+try:
+    with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+        _CONFIG = json.load(f)
+except Exception as exc:
+    Exception("Could not read config.json at %s: %s", _CONFIG_PATH, exc)
+    _CONFIG = {}
+
+resident_update_interval = _CONFIG.get("resident_update_interval", 3)
 
 class Colony:
 	"""Wrapper class for colony management"""
 
 	def __init__(self, colony: ColonyModel):
 		self.colony = colony
+		self.last_residents_update = time.time()
+		self._previous_state = self.colony.dict()
+		self._has_changes = False
 
 	def to_dict(self):
 		return self.colony.dict()
@@ -18,17 +35,57 @@ class Colony:
 		if self.colony.colonyFleet is None:
 			self.colony.colonyFleet = []
 		self.colony.colonyFleet.append(fleet)
+		self._mark_changed()
 
 	def remove_fleet(self, fleet_id: str):
 		if not self.colony.colonyFleet:
 			return
+		old_count = len(self.colony.colonyFleet)
 		self.colony.colonyFleet = [f for f in self.colony.colonyFleet if f.id != fleet_id]
+		if len(self.colony.colonyFleet) != old_count:
+			self._mark_changed()
 
 	def change_residents(self, delta: int):
 		self.colony.residents = max(0, self.colony.residents + delta)
+		self._mark_changed()
 
 	def update(self) -> None:
+		delta = time.time() - self.last_residents_update
+		if delta > resident_update_interval:
+			self.increase_residents()
 		return
+
+	def increase_residents(self):
+		amount = 100
+		print(f"Colony {self.colony.id} increasing residents by {amount} (from {self.colony.residents})")
+		self.change_residents(amount)
+		self.last_residents_update = time.time()
+
+	def get_changes(self) -> Optional[Dict[str, Any]]:
+		"""Return changes since last check, or None if no changes."""
+		if not self._has_changes:
+			return None
+		
+		current_state = self.colony.dict()
+		changes = {}
+		
+		# Compare current state with previous state
+		for key, current_value in current_state.items():
+			if key not in self._previous_state or self._previous_state[key] != current_value:
+				changes[key] = current_value
+		
+		changes["id"] = self.colony.id
+		
+		# Reset change tracking
+		self._previous_state = current_state
+		self._has_changes = False
+		
+		return changes
+
+	def _mark_changed(self):
+		"""Mark this colony as having changes."""
+		print(f"Colony {self.colony.id} marked as changed")
+		self._has_changes = True
 
 	@classmethod
 	def create_colony(cls, payload: dict, existing_colonies: Optional[List["Colony"]] = None) -> "Colony":
@@ -48,7 +105,7 @@ class Colony:
 		if 'planet' not in _payload or not _payload.get('planet'):
 			min_dist = 20.0
 			max_attempts = 1000
-
+		
 			def random_pos():
 				return np.array([
 					random.uniform(-100.0, 100.0),
