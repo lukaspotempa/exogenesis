@@ -82,27 +82,4 @@ class ColonyModel(BaseModel):
     colonyFleet: Optional[List[Fleet]] = None
 
 
-class Colony:
-    """Wrapper class for colony management
-    """
-
-    def __init__(self, colony: ColonyModel):
-        self.colony = colony
-
-    def to_dict(self):
-        return self.colony.dict()
-
-    def add_fleet(self, fleet: Fleet):
-        if self.colony.colonyFleet is None:
-            self.colony.colonyFleet = []
-        self.colony.colonyFleet.append(fleet)
-
-    def remove_fleet(self, fleet_id: str):
-        if not self.colony.colonyFleet:
-            return
-        self.colony.colonyFleet = [f for f in self.colony.colonyFleet if f.id != fleet_id]
-
-    def change_residents(self, delta: int):
-        self.colony.residents = max(0, self.colony.residents + delta)
-
 

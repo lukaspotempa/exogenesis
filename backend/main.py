@@ -1,18 +1,29 @@
 from fastapi import FastAPI, WebSocket
 from game.connection import ConnectionManager
 from game.manager import GameManager
+from contextlib import asynccontextmanager
 
 
-app = FastAPI()
+
+connection_manager = ConnectionManager()
+game_manager = GameManager()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    game_manager.initialise_game()
+
+    yield
+
+    game_manager.clear_colonies()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/")
 async def root():
     return {"message": "Exogenesis backend up"}
-
-
-manager = ConnectionManager()
-game_manager = GameManager()
 
 
 @app.get('/api/colonies')
