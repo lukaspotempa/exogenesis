@@ -11,10 +11,15 @@ game_manager = GameManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # initialise seed colonies and start the periodic game loop
     game_manager.initialise_game()
+    # start the game loop with 200ms tick interval
+    await game_manager.start_game_loop(interval=0.2)
 
     yield
 
+    # stop loop and clear state on shutdown
+    await game_manager.stop_game_loop()
     game_manager.clear_colonies()
 
 

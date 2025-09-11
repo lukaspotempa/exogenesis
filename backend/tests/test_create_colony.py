@@ -1,4 +1,4 @@
-from backend.game.manager import GameManager
+from ..game.manager import GameManager
 
 
 def run_test():

@@ -2,8 +2,7 @@ import uuid
 import random
 import math
 import numpy as np
-from typing import Optional, List
-from enum import Enum
+from typing import Optional, List, Dict, Any
 from ..models import ColonyModel, Fleet
 
 class Colony:
@@ -28,15 +27,25 @@ class Colony:
 	def change_residents(self, delta: int):
 		self.colony.residents = max(0, self.colony.residents + delta)
 
+	def update(self) -> None:
+		return
+
 	@classmethod
 	def create_colony(cls, payload: dict, existing_colonies: Optional[List["Colony"]] = None) -> "Colony":
-		if 'id' not in payload or not payload.get('id'):
-			payload['id'] = str(uuid.uuid4())
+		"""Factory: create a Colony from a payload dict.
+
+		This method does not mutate the provided payload; it works on a shallow copy.
+		"""
+		# work on a copy so callers' dicts aren't mutated
+		_payload: Dict[str, Any] = dict(payload)
+
+		if 'id' not in _payload or not _payload.get('id'):
+			_payload['id'] = str(uuid.uuid4())
 
 		# If no planet data provided, generate a random planet for colony
 		# random vector in [-100, 100] on each axis, and ensure at least
 		# 20 units distance from all existing colony planets
-		if 'planet' not in payload or not payload.get('planet'):
+		if 'planet' not in _payload or not _payload.get('planet'):
 			min_dist = 20.0
 			max_attempts = 1000
 
@@ -83,7 +92,7 @@ class Colony:
 					"temperature": float(random.uniform(0.0, 30.0)),
 				},
 			}
-			payload['planet'] = planet
+			_payload['planet'] = planet
 
-		colony_model = ColonyModel(**payload)
+		colony_model = ColonyModel(**_payload)
 		return cls(colony_model)
