@@ -14,16 +14,19 @@ import type { Colony } from './types/Types'
 interface ControlsLike {
   target: THREE.Vector3;
   update: () => void;
+  object?: THREE.Camera;
 }
 
 function CameraController({
   position = [0, 0, 50] as [number, number, number],
   lookAt = [0, 0, 0] as [number, number, number],
   controlsRef,
+  isUserInitiated = false,
 }: {
   position?: [number, number, number];
   lookAt?: [number, number, number];
   controlsRef?: React.RefObject<ControlsLike | null>;
+  isUserInitiated?: boolean;
 }) {
   const { camera } = useThree();
 
@@ -35,7 +38,6 @@ function CameraController({
     targetPos: new THREE.Vector3(),
     startLookAt: new THREE.Vector3(),
     targetLookAt: new THREE.Vector3(),
-    lastPosKey: '',
   });
 
   // easing fn
@@ -46,16 +48,9 @@ function CameraController({
 
 
   useEffect(() => {
-    // Only animate if the position key has actually changed
-    if (posKey === animRef.current.lastPosKey) {
-      // Update orbit controls target without animation if it exists
-      const ctrl = controlsRef?.current ?? null;
-      if (ctrl && ctrl.target) {
-        ctrl.target.set(lookAt[0], lookAt[1], lookAt[2]);
-      }
-      return;
-    }
-
+    // Skip camera updates if not user initiated
+    if (!isUserInitiated) return;
+    
     const now = performance.now();
     const startPos = camera.position.clone();
 
@@ -75,8 +70,7 @@ function CameraController({
     animRef.current.targetLookAt.set(lookAt[0], lookAt[1], lookAt[2]);
     animRef.current.startTime = now;
     animRef.current.running = true;
-    animRef.current.lastPosKey = posKey;
-  }, [posKey, lookKey, position, lookAt, camera, controlsRef]);
+  }, [posKey, lookKey, position, lookAt, camera, controlsRef, isUserInitiated]);
 
   useFrame(() => {
     if (!animRef.current.running) return;
@@ -119,6 +113,7 @@ function onMessage(ev: MessageEvent) {
 function App() {
   const [colonies, setColonies] = useState(() => coloniesStore.getColonies() ?? []);
   const [activeColony, setActiveColony] = useState<Colony | null>(null);
+  const [isUserInitiatedChange, setIsUserInitiatedChange] = useState(true);
   const controlsRef = useRef<ControlsLike | null>(null);
   const handleControlsRef = (instance: unknown) => {
 
@@ -133,10 +128,10 @@ function App() {
       const updatedColonies = coloniesStore.getColonies();
       setColonies(updatedColonies);
       
-      // Update active colony if it was changed - find the updated version in the new colonies list
       if (activeColony) {
         const updatedActiveColony = updatedColonies.find(colony => colony.id === activeColony.id);
         if (updatedActiveColony) {
+          setIsUserInitiatedChange(false);
           setActiveColony(updatedActiveColony);
         }
       }
@@ -208,6 +203,7 @@ function App() {
   useEffect(() => {
     coloniesStore.setColonies(sampleColonies);
     setColonies(sampleColonies);
+    setIsUserInitiatedChange(true);
     setActiveColony(sampleColonies?.[0] ?? null);
   }, []);
 
@@ -220,7 +216,14 @@ function App() {
       <div style={{ width: '100vw', height: '100vh', background: 'black' }}>
         <div className="ui-wrapper">
           <div className="colony-list-container">
-            <ColonyList colonies={colonies} activeColony={activeColony!} setActiveColony={setActiveColony} />
+            <ColonyList 
+              colonies={colonies} 
+              activeColony={activeColony!} 
+              setActiveColony={(colony) => {
+                setIsUserInitiatedChange(true);
+                setActiveColony(colony);
+              }} 
+            />
           </div>
           <div className="colony-details-container">
             <PlanetDetails activeColony={activeColony!} setActiveColony={setActiveColony} />
@@ -233,6 +236,7 @@ function App() {
               position={activeColony ? [activeColony.planet.position.x, activeColony.planet.position.y, activeColony.planet.position.z + 30] : [0, 0, 50]}
               lookAt={activeColony ? [activeColony.planet.position.x, activeColony.planet.position.y, activeColony.planet.position.z] : [0, 0, 0]}
               controlsRef={controlsRef}
+              isUserInitiated={isUserInitiatedChange}
             />
 
             <MainScene />
