@@ -1,9 +1,29 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
-import type { Colony as ColonyType, Fleet } from '../../types/Types';
+import type { Colony as ColonyType, Fleet, ColonyLevel } from '../../types/Types';
 import { PlanetA } from './planets/PlanetA';
 import { ColonyBaseSmall } from './structures/ColonyBaseSmall';
+import { ColonyMetropolis } from './structures/ColonyMetropolis';
 import { BaseFlag } from './structures/BaseFlag';
+
+// Map colony levels to their corresponding base structure components
+const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyColor?: string }>> = {
+  'Colony': ColonyBaseSmall,
+  'Settlement': ColonyBaseSmall,
+  'Township': ColonyMetropolis,
+  'Metropolis': ColonyMetropolis,
+  'Starport Hub': ColonyMetropolis,
+};
+
+const HEIGHT_OFFSET: Record<string, number> = {
+  'Colony': -0.03,
+  'Metropolis': 0.35
+};
+
+// Get the appropriate base structure component for a given colony level
+const getBaseStructure = (colonyLevel: ColonyLevel): React.ComponentType<{ colonyColor?: string }> => {
+  return COLONY_BASE_STRUCTURES[colonyLevel] || ColonyBaseSmall; // Fallback to ColonyBaseSmall if level not found
+};
 import { FleetAttacker } from '../Scene/fleet/FleetAttacker';
 
 interface ColonyProps {
@@ -43,7 +63,6 @@ interface RaycastResult {
 // Constants
 const COORDINATE_SCALE = 50;
 const BASE_OFFSET = 0.01;
-const STRUCTURE_Y_OFFSET = -0.02;
 const RAY_ORIGIN_MULTIPLIER = 3;
 
 export function Colony({ colony }: ColonyProps): React.JSX.Element {
@@ -58,14 +77,14 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   // Define structures to be placed at the colony site.
   const colonyObjects: StructureConfig[] = useMemo(() => [
     {
-      component: ColonyBaseSmall,
+      component: getBaseStructure(colony.colonyLevel),
       position: new THREE.Vector3(0, 0, 0),
     },
     {
       component: BaseFlag,
       position: new THREE.Vector3(0, 0, 1),
     }
-  ], []);
+  ], [colony.colonyLevel]);
 
   // Utility function to convert 2D coordinates to spherical direction
   const calculateSphericalDirection = useCallback((x: number, y: number): THREE.Vector3 => {
@@ -228,8 +247,10 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
         const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), raycastResult.normal);
         const finalQuat = combineRotations(quat, obj.rotation);
         const localQuat = groupWorldQuat.clone().invert().multiply(finalQuat);
-
-        const worldPos = raycastResult.point.add(raycastResult.normal.clone().multiplyScalar(BASE_OFFSET));
+        
+        
+        const worldPos = raycastResult.point.add(raycastResult.normal.clone()
+        .multiplyScalar(HEIGHT_OFFSET[colony.colonyLevel]));
         const localPos = planetGroup.worldToLocal(worldPos.clone());
 
         results.push({ 
@@ -299,7 +320,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
         return (
           <group 
             key={index} 
-            position={[p.x, p.y + STRUCTURE_Y_OFFSET, p.z]} 
+            position={[p.x, p.y, p.z]} 
             quaternion={[q.x, q.y, q.z, q.w]}
           >
             <Component colonyColor={colonyColor} />

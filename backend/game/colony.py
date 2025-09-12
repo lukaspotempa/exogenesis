@@ -18,6 +18,8 @@ except Exception as exc:
     _CONFIG = {}
 
 resident_update_interval = _CONFIG.get("resident_update_interval", 3)
+colony_distance = _CONFIG.get("colony_min_distance", 20)
+space_generation_range = _CONFIG.get("space_generation_range", {"min": -100, "max": 100})
 
 class Colony:
 	"""Wrapper class for colony management"""
@@ -91,24 +93,22 @@ class Colony:
 
 		This method does not mutate the provided payload; it works on a shallow copy.
 		"""
-		# work on a copy so callers' dicts aren't mutated
+		# copy because muteable
 		_payload: Dict[str, Any] = dict(payload)
 
 		if 'id' not in _payload or not _payload.get('id'):
 			_payload['id'] = str(uuid.uuid4())
 
 		# If no planet data provided, generate a random planet for colony
-		# random vector in [-100, 100] on each axis, and ensure at least
-		# 20 units distance from all existing colony planets
 		if 'planet' not in _payload or not _payload.get('planet'):
-			min_dist = 20.0
-			max_attempts = 1000
+			min_dist = colony_distance
+			max_attempts = 1000 # This is so we don't loop indefinetly
 		
 			def random_pos():
 				return np.array([
-					random.uniform(-100.0, 100.0),
-					random.uniform(-100.0, 100.0),
-					random.uniform(-100.0, 100.0),
+					random.uniform(space_generation_range["min"], space_generation_range["max"]),
+					random.uniform(space_generation_range["min"], space_generation_range["max"]),
+					random.uniform(space_generation_range["min"], space_generation_range["max"]),
 				], dtype=float)
 
 			existing_positions = []

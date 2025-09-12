@@ -1,4 +1,7 @@
 {
     "defaultResidents": 100,
-    "resident_update_interval": 5
+    "resident_update_interval": 5,
+    "colony_min_distance": 40,
+    "residents_base_growth": 10,
+    "space_generation_range": {"min": -100, "max": 100}
 }

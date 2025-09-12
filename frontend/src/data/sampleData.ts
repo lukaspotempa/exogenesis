@@ -20,7 +20,7 @@ export const sampleColonies: Colony[] = [
         temperature: 15
       },
     },
-    colonyLevel: 'Colony',
+    colonyLevel: 'Metropolis',
     colonyFleet: [{
       id: '400',
       type: 'Attacker',
