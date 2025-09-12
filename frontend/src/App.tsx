@@ -35,6 +35,7 @@ function CameraController({
     targetPos: new THREE.Vector3(),
     startLookAt: new THREE.Vector3(),
     targetLookAt: new THREE.Vector3(),
+    lastPosKey: '',
   });
 
   // easing fn
@@ -45,6 +46,16 @@ function CameraController({
 
 
   useEffect(() => {
+    // Only animate if the position key has actually changed
+    if (posKey === animRef.current.lastPosKey) {
+      // Update orbit controls target without animation if it exists
+      const ctrl = controlsRef?.current ?? null;
+      if (ctrl && ctrl.target) {
+        ctrl.target.set(lookAt[0], lookAt[1], lookAt[2]);
+      }
+      return;
+    }
+
     const now = performance.now();
     const startPos = camera.position.clone();
 
@@ -64,6 +75,7 @@ function CameraController({
     animRef.current.targetLookAt.set(lookAt[0], lookAt[1], lookAt[2]);
     animRef.current.startTime = now;
     animRef.current.running = true;
+    animRef.current.lastPosKey = posKey;
   }, [posKey, lookKey, position, lookAt, camera, controlsRef]);
 
   useFrame(() => {
