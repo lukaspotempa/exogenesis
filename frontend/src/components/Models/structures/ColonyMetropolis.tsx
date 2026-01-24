@@ -12,10 +12,6 @@ interface BaseSmallGLTF extends GLTF {
   };
 }
 
-interface Props {
-  colonyColor?: string;
-}
-
 const ColonyMetropolis = ({ colonyColor }: { colonyColor?: string }): React.JSX.Element => {
   // call hook unconditionally to satisfy React Hook rules
   const gltf = useGLTF('/models/structures/Urban Park v1-transformed.glb') as unknown as Partial<BaseSmallGLTF>;

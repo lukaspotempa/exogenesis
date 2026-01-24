@@ -4,12 +4,14 @@ import type { Colony as ColonyType, Fleet, ColonyLevel } from '../../types/Types
 import { PlanetA } from './planets/PlanetA';
 import { ColonyBaseSmall } from './structures/ColonyBaseSmall';
 import { ColonyMetropolis } from './structures/ColonyMetropolis';
+import { ColonySettlement } from './structures/ColonySettlement';
 import { BaseFlag } from './structures/BaseFlag';
+import { OilPump } from './structures/OilPump';
 
 // Map colony levels to their corresponding base structure components
 const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyColor?: string }>> = {
   'Colony': ColonyBaseSmall,
-  'Settlement': ColonyBaseSmall,
+  'Settlement': ColonySettlement,
   'Township': ColonyMetropolis,
   'Metropolis': ColonyMetropolis,
   'Starport Hub': ColonyMetropolis,

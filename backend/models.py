@@ -15,10 +15,16 @@ class Vector3(BaseModel):
 
 
 class NaturalResources(BaseModel):
+    # Generation rates (per tick)
     oil: float
     steel: float
     water: float
-    temperature: float
+    temperature: float  # Environmental factor (not stored, affects growth)
+    
+    # Storage (accumulated resources)
+    oilStorage: float = 0.0
+    steelStorage: float = 0.0
+    waterStorage: float = 0.0
 
 
 class ResourceStation(BaseModel):

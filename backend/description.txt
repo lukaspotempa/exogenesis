@@ -1,0 +1,36 @@
+# General
+- 0 player colony survival game
+- connection through websocket, server is authoritary
+- websocket server sends updates to clients about what happens
+- client displays what happens in the world
+- server decides actions and updates them to the client
+
+# Colonies
+- a colony has one home / start planet
+- a colony starts with random resources
+- each colony has a "residents" count, which indicates how many people live in that colony
+- residents increase in dependency of the resources, not independently, so if we have a good atmosphere temperature and a lot of water, inhabitants will residents
+- the fleets / ships and buildings which a colony can build are directly influced by the other resources
+- each colony can take over other colonies/planets. If they take them over, the planet is then owned by the winner of the fight
+- each planet has a main base, if the main base is destroyed, the destroying entity acquires ownership
+- each colony can dispatch their own fleets for stuff
+- colonies (main bases and cities) upgrade by inhabitants. A certain threshold of inhabitants/residents allows a small city, then metropolis etc
+
+# Colony behavior
+- colonies can have certain traits / politcal orientations. A colony can be: 
+* pacifist, they do not attack nor fight back at all, they only build economical stuff, no fleets at all.
+* aggresive, they tend to attack a lot, they tend to build a lot of fleets
+* defensive, they don't initiate fights but fight back, they to build some fleets, but more defensive stuff and production buildings
+
+# Colony resources
+- colonies have resources, however the resources are not just "acquired"
+- to acquire resources, colonies have to build production buildings
+- for oil: refineries, for steel mines / quarrys
+- to upgrade the base level they need to have certain amount of inhabitants, water, steel and oil (in storage), and a certain inhabitant cap
+- once they reach a new base level, their base growth increases
+
+
+# Ships and fleets
+- ships are individual ships, fleets are the object that roams the world
+- each fleet has hp and if it reaches 0, it is destroyed
+- a fleet can only attack one target at a time

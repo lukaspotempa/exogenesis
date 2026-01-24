@@ -3,5 +3,54 @@
     "resident_update_interval": 5,
     "colony_min_distance": 40,
     "residents_base_growth": 10,
-    "space_generation_range": {"min": -100, "max": 100}
+    "space_generation_range": {"min": -100, "max": 100},
+    
+    "ideal_temperature": 15.0,
+    "temperature_tolerance": 10.0,
+
+    "base_growth_rate": 20,
+    
+    "water_growth_multiplier": 2,
+    "building_capacity_per_steel": 50,
+    "building_capacity_per_oil": 30,
+    
+    "initial_resource_storage": 1000.0,
+    
+    "colony_level_thresholds": {
+        "Colony": {
+            "residents": 0,
+            "water_storage": 0,
+            "steel_storage": 0,
+            "oil_storage": 0,
+            "unlocked_fleet_types": ["Flanker"]
+        },
+        "Settlement": {
+            "residents": 500,
+            "water_storage": 2000,
+            "steel_storage": 1500,
+            "oil_storage": 1000,
+            "unlocked_fleet_types": ["Flanker", "Fighter"]
+        },
+        "Township": {
+            "residents": 2000,
+            "water_storage": 5000,
+            "steel_storage": 4000,
+            "oil_storage": 3000,
+            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker"]
+        },
+        "Metropolis": {
+            "residents": 5000,
+            "water_storage": 10000,
+            "steel_storage": 8000,
+            "oil_storage": 6000,
+            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"]
+        },
+        "Starport Hub": {
+            "residents": 10000,
+            "water_storage": 20000,
+            "steel_storage": 15000,
+            "oil_storage": 12000,
+            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"]
+        }
+    }
 }
