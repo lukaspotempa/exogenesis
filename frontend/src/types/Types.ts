@@ -18,6 +18,7 @@ export interface Planet {
     planetMainBase: { x: number, y: number }; // Main base location on a planet
     planetNaturalResources: NaturalResources;
     planetResourceStation?: ResourceStation[];
+    oilPumps?: OilPump[];
 }
 
 export interface NaturalResources {
@@ -25,11 +26,20 @@ export interface NaturalResources {
     steel: number;
     water: number;
     temperature: number;
+    oilStorage?: number;
+    steelStorage?: number;
+    waterStorage?: number;
 }
 
 export interface ResourceStation { // Resource Outposts like drilling stations, only available on planets
     position: { x: number, y: number }
     resourceType: keyof NaturalResources;
+}
+
+export interface OilPump {
+    id: string;
+    position: { x: number, y: number };
+    production: number;
 }
 
 export type ColonyLevel = 'Colony' | 'Settlement' | 'Township' | 'Metropolis' | 'Starport Hub';

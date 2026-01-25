@@ -3,7 +3,7 @@ import random
 import math
 import numpy as np
 from typing import Optional, List, Dict, Any
-from models import ColonyModel, Fleet, ColonyLevel
+from models import ColonyModel, Fleet, ColonyLevel, OilPump, Vector2
 import time
 from pathlib import Path
 import json
@@ -33,6 +33,19 @@ initial_resource_storage = _CONFIG.get("initial_resource_storage", 1000.0)
 # Colony level thresholds
 colony_level_thresholds = _CONFIG.get("colony_level_thresholds", {})
 
+# Oil pump configuration
+oil_pump_steel_cost = _CONFIG.get("oil_pump_steel_cost", 500)
+oil_pump_max_per_planet = _CONFIG.get("oil_pump_max_per_planet", 3)
+
+# Colony level progression order
+COLONY_LEVEL_ORDER = [
+	ColonyLevel.Colony,
+	ColonyLevel.Settlement,
+	ColonyLevel.Township,
+	ColonyLevel.Metropolis,
+	ColonyLevel.StarportHub
+]
+
 class Colony:
 	"""Wrapper class for colony management"""
 
@@ -41,6 +54,7 @@ class Colony:
 		self.last_residents_update = time.time()
 		self._previous_state = self.colony.dict()
 		self._has_changes = False
+		self._next_pump_id = 1
 
 	def to_dict(self):
 		return self.colony.dict()
@@ -68,10 +82,14 @@ class Colony:
 		if delta > resident_update_interval:
 			# Accumulate resources based on generation rates
 			self.accumulate_resources(delta)
+			# Produce oil from oil pumps
+			self.produce_oil_from_pumps(delta)
 			# Calculate and apply resident growth/consumption
 			self.increase_residents()
 			# Check for colony level upgrades
 			self.check_and_upgrade_level()
+			# Auto-build structures when resources are available
+			self.auto_build_structures()
 		return
 
 	def accumulate_resources(self, time_delta: float):
@@ -90,6 +108,70 @@ class Colony:
 		resources.oilStorage = max(0, resources.oilStorage)
 		resources.steelStorage = max(0, resources.steelStorage)
 		resources.waterStorage = max(0, resources.waterStorage)
+		
+		self._mark_changed()
+
+	def can_build_oil_pump(self) -> bool:
+		"""Check if the colony can build an oil pump."""
+		# Must be at least Settlement level
+		try:
+			current_index = COLONY_LEVEL_ORDER.index(self.colony.colonyLevel)
+			# Settlement is index 1
+			if current_index < 1:
+				return False
+		except ValueError:
+			return False
+		
+		# Check if we haven't reached max pumps
+		if self.colony.planet.oilPumps is None:
+			self.colony.planet.oilPumps = []
+		
+		if len(self.colony.planet.oilPumps) >= oil_pump_max_per_planet:
+			return False
+		
+		# Check if we have enough steel
+		if self.colony.planet.planetNaturalResources.steelStorage < oil_pump_steel_cost:
+			return False
+		
+		return True
+
+	def build_oil_pump(self) -> Optional[OilPump]:
+		"""Build an oil pump if possible."""
+		if not self.can_build_oil_pump():
+			return None
+		
+		# Deduct steel cost
+		self.colony.planet.planetNaturalResources.steelStorage -= oil_pump_steel_cost
+		
+		# Initialize oilPumps list if needed
+		if self.colony.planet.oilPumps is None:
+			self.colony.planet.oilPumps = []
+		
+		# Create oil pump at random position
+		# Production rate is based on planet's natural oil generation rate
+		pump = OilPump(
+			id=str(self._next_pump_id),
+			position=Vector2(x=float(random.uniform(-1.0, 1.0)), y=float(random.uniform(-50.0, 50.0))),
+			production=self.colony.planet.planetNaturalResources.oil
+		)
+		
+		self._next_pump_id += 1
+		self.colony.planet.oilPumps.append(pump)
+		self._mark_changed()
+		
+		return pump
+
+	def produce_oil_from_pumps(self, time_delta: float):
+		"""Produce oil from all oil pumps."""
+		if not self.colony.planet.oilPumps:
+			return
+		
+		# Calculate how many tick intervals have passed
+		ticks = time_delta / resident_update_interval
+		
+		# Add oil production from each pump
+		for pump in self.colony.planet.oilPumps:
+			self.colony.planet.planetNaturalResources.oilStorage += pump.production * ticks
 		
 		self._mark_changed()
 
@@ -185,18 +267,10 @@ class Colony:
 
 	def get_next_colony_level(self, current_level: ColonyLevel) -> Optional[ColonyLevel]:
 		"""Get the next colony level in the progression."""
-		level_order = [
-			ColonyLevel.Colony,
-			ColonyLevel.Settlement,
-			ColonyLevel.Township,
-			ColonyLevel.Metropolis,
-			ColonyLevel.StarportHub
-		]
-		
 		try:
-			current_index = level_order.index(current_level)
-			if current_index < len(level_order) - 1:
-				return level_order[current_index + 1]
+			current_index = COLONY_LEVEL_ORDER.index(current_level)
+			if current_index < len(COLONY_LEVEL_ORDER) - 1:
+				return COLONY_LEVEL_ORDER[current_index + 1]
 		except ValueError:
 			pass
 		
@@ -249,6 +323,14 @@ class Colony:
 				resources.waterStorage = max(0, resources.waterStorage)
 				resources.steelStorage = max(0, resources.steelStorage)
 				resources.oilStorage = max(0, resources.oilStorage)
+	
+	def auto_build_structures(self):
+		"""Automatically build structures based on colony needs and resources."""
+		# Try to build oil pumps if we can
+		while self.can_build_oil_pump():
+			pump = self.build_oil_pump()
+			if pump is None:
+				break  # Failed to build, stop trying
 
 	def get_unlocked_fleet_types(self) -> List[str]:
 		"""Get the list of fleet types unlocked at the current colony level."""
@@ -326,7 +408,7 @@ class Colony:
 					raise Exception('Failed to find non-overlapping planet position after many attempts')
 				pos = random_pos()
 
-			planet_models = ["Planet_A"]
+			planet_models = ["Planet_A", "Planet_B"]
 
 			planet = {
 				"position": {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])},

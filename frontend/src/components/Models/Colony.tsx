@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import * as THREE from 'three';
 import type { Colony as ColonyType, Fleet, ColonyLevel } from '../../types/Types';
 import { PlanetA } from './planets/PlanetA';
+import { PlanetB } from './planets/PlanetB';
 import { ColonyBaseSmall } from './structures/ColonyBaseSmall';
 import { ColonyMetropolis } from './structures/ColonyMetropolis';
 import { ColonySettlement } from './structures/ColonySettlement';
@@ -75,6 +76,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   const [baseRotation, setBaseRotation] = useState<THREE.Quaternion | null>(null);
   const [placedStructures, setPlacedStructures] = useState<PlacedStructure[]>([]);
   const [placedFleets, setPlacedFleets] = useState<PlacedFleet[]>([]);
+  const [placedOilPumps, setPlacedOilPumps] = useState<PlacedStructure[]>([]);
 
   // Define structures to be placed at the colony site.
   const colonyObjects: StructureConfig[] = useMemo(() => [
@@ -180,6 +182,8 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     switch (planetModelName) {
       case 'Planet_A':
         return <PlanetA colonyColor={colonyColor} />;
+      case 'Planet_B':
+        return <PlanetB colonyColor={colonyColor} />;
       default:
         console.warn(`Unknown planet model: ${planetModelName}`);
         return <PlanetA colonyColor={colonyColor} />;
@@ -269,11 +273,64 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   }, [
     basePosition, 
     baseRotation, 
-    colonyObjects, 
+    colonyObjects,
+    colony.colonyLevel,
     setupPlanetMesh, 
     raycastToSurface, 
     transformOffsetToWorldSpace, 
     combineRotations
+  ]);
+
+  // Calculate positions for oil pumps
+  useEffect(() => {
+    if (!planetGroupRef.current || !colony.planet.oilPumps || colony.planet.oilPumps.length === 0) {
+      setPlacedOilPumps([]);
+      return;
+    }
+
+    const planetGroup = planetGroupRef.current;
+    const planetMesh = setupPlanetMesh(planetGroup);
+    
+    if (!planetMesh) {
+      console.warn('Planet surface mesh not ready for placing oil pumps');
+      return;
+    }
+
+    const planetCenter = new THREE.Vector3();
+    planetGroup.getWorldPosition(planetCenter);
+
+    const groupWorldQuat = new THREE.Quaternion();
+    planetGroup.getWorldQuaternion(groupWorldQuat);
+
+    const results: PlacedStructure[] = [];
+
+    colony.planet.oilPumps.forEach((pump) => {
+      const direction = calculateSphericalDirection(pump.position.x, pump.position.y);
+      const raycastResult = raycastToSurface(planetGroup, planetMesh, direction);
+
+      if (raycastResult) {
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), raycastResult.normal);
+        const localQuat = groupWorldQuat.clone().invert().multiply(quat);
+        
+        const worldPos = raycastResult.point.add(raycastResult.normal.clone().multiplyScalar(BASE_OFFSET));
+        const localPos = planetGroup.worldToLocal(worldPos.clone());
+
+        results.push({ 
+          component: OilPump, 
+          position: localPos, 
+          quaternion: localQuat 
+        });
+      } else {
+        console.warn('Raycast failed for oil pump', pump);
+      }
+    });
+
+    setPlacedOilPumps(results);
+  }, [
+    colony.planet.oilPumps,
+    setupPlanetMesh,
+    raycastToSurface,
+    calculateSphericalDirection
   ]);
 
   // Calculate local positions for fleets and select the correct component for each fleet type
@@ -322,6 +379,21 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
         return (
           <group 
             key={index} 
+            position={[p.x, p.y, p.z]} 
+            quaternion={[q.x, q.y, q.z, q.w]}
+          >
+            <Component colonyColor={colonyColor} />
+          </group>
+        );
+      })}
+
+      {/* Oil Pumps placed via raycast */}
+      {placedOilPumps.map((pump, index) => {
+        const Component = pump.component;
+        const { position: p, quaternion: q } = pump;
+        return (
+          <group 
+            key={`oil-pump-${index}`} 
             position={[p.x, p.y, p.z]} 
             quaternion={[q.x, q.y, q.z, q.w]}
           >

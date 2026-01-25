@@ -32,6 +32,12 @@ class ResourceStation(BaseModel):
     resourceType: Literal["oil", "steel", "water", "temperature"]
 
 
+class OilPump(BaseModel):
+    id: str
+    position: Vector2
+    production: float = 0.0  # Oil produced per tick (0-2)
+
+
 class Planet(BaseModel):
     position: Vector3
     scale: float
@@ -40,6 +46,7 @@ class Planet(BaseModel):
     planetMainBase: Vector2
     planetNaturalResources: NaturalResources
     planetResourceStation: Optional[List[ResourceStation]] = None
+    oilPumps: Optional[List[OilPump]] = None
 
 
 class ColonyLevel(str, Enum):

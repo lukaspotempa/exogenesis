@@ -11,7 +11,7 @@ export function Model(props) {
   const { nodes, materials } = useGLTF('/Planet-transformed.glb')
   return (
     <group {...props} dispose={null}>
-      <mesh geometry={nodes.Planet_3.geometry} material={materials.Atlas} scale={100} />
+      <mesh geometry={nodes.Planet_3.geometry} material={materials.Atlas} scale={25000} />
     </group>
   )
 }

@@ -16,6 +16,9 @@
     
     "initial_resource_storage": 1000.0,
     
+    "oil_pump_steel_cost": 200,
+    "oil_pump_max_per_planet": 3,
+    
     "colony_level_thresholds": {
         "Colony": {
             "residents": 0,
