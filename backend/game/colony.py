@@ -3,7 +3,7 @@ import random
 import math
 import numpy as np
 from typing import Optional, List, Dict, Any
-from models import ColonyModel, Fleet, ColonyLevel, OilPump, Vector2
+from models import ColonyModel, Fleet, ColonyLevel, OilPump, Vector2, Vector3
 import time
 from pathlib import Path
 import json
@@ -37,6 +37,14 @@ colony_level_thresholds = _CONFIG.get("colony_level_thresholds", {})
 oil_pump_steel_cost = _CONFIG.get("oil_pump_steel_cost", 500)
 oil_pump_max_per_planet = _CONFIG.get("oil_pump_max_per_planet", 3)
 
+# Flanker configuration
+flanker_group_size = _CONFIG.get("flanker_group_size", 3)
+flanker_steel_cost = _CONFIG.get("flanker_steel_cost", 300)
+flanker_oil_cost = _CONFIG.get("flanker_oil_cost", 150)
+flanker_spawn_height = _CONFIG.get("flanker_spawn_height", 5)
+flanker_spacing = _CONFIG.get("flanker_spacing", 2)
+flanker_build_cooldown = _CONFIG.get("flanker_build_cooldown", 30)
+
 # Colony level progression order
 COLONY_LEVEL_ORDER = [
 	ColonyLevel.Colony,
@@ -56,6 +64,7 @@ class Colony:
 		self._has_changes = False
 		self._next_pump_id = 1
 		self._action_events = []  # Track action events for this colony
+		self.last_flanker_build_time = 0  # Track last time flankers were built
 
 	def to_dict(self):
 		return self.colony.dict()
@@ -338,6 +347,96 @@ class Colony:
 			pump = self.build_oil_pump()
 			if pump is None:
 				break  # Failed to build, stop trying
+		
+		# Try to build flanker groups if we can
+		if self.can_build_flanker_group():
+			self.build_flanker_group()
+
+	def can_build_flanker_group(self) -> bool:
+		"""Check if the colony can build a flanker group."""
+		# Check if flanker type is unlocked
+		if not self.can_build_fleet_type("Flanker"):
+			return False
+		
+		# Check cooldown
+		if time.time() - self.last_flanker_build_time < flanker_build_cooldown:
+			return False
+		
+		# Check max fleet groups limit
+		if self.colony.colonyLevel.value in colony_level_thresholds:
+			max_groups = colony_level_thresholds[self.colony.colonyLevel.value].get("max_fleet_groups", 1)
+			# Count current flanker fleet groups
+			if self.colony.colonyFleet:
+				flanker_fleets = sum(1 for f in self.colony.colonyFleet if f.type == "Flanker")
+				if flanker_fleets >= max_groups:
+					return False
+		
+		# Check if we have enough resources
+		resources = self.colony.planet.planetNaturalResources
+		if resources.steelStorage < flanker_steel_cost:
+			return False
+		if resources.oilStorage < flanker_oil_cost:
+			return False
+		
+		return True
+
+	def build_flanker_group(self) -> Optional[Fleet]:
+		"""Build a group of flankers (always come in groups of 3)."""
+		if not self.can_build_flanker_group():
+			return None
+		
+		# Deduct resources
+		resources = self.colony.planet.planetNaturalResources
+		resources.steelStorage -= flanker_steel_cost
+		resources.oilStorage -= flanker_oil_cost
+		
+		# Get the planet's world position
+		# Frontend will handle positioning relative to the colony base
+		planet_pos = self.colony.planet.position
+		
+		# Spawn at planet center - frontend will offset to proper position
+		base_world_pos = Vector3(
+			x=planet_pos.x,
+			y=planet_pos.y,
+			z=planet_pos.z
+		)
+		
+		# Initialize colonyFleet if needed
+		if self.colony.colonyFleet is None:
+			self.colony.colonyFleet = []
+		
+		# Create a single fleet entity that represents the flanker group
+		# The frontend will handle rendering the formation based on count
+		
+		group_id = str(uuid.uuid4())[:8]
+		
+		flanker_fleet = Fleet(
+			id=f"flanker_{group_id}",
+			type="Flanker",
+			label=f"{self.colony.name} Flankers",
+			count=flanker_group_size,  # Backend tracks count, frontend renders formation
+			position=Vector3(
+				x=base_world_pos.x,
+				y=base_world_pos.y + flanker_spawn_height,
+				z=base_world_pos.z
+			),
+			velocity=Vector3(x=0.0, y=0.0, z=0.0),
+			state="Idle",
+			tactic="Offensive",
+			hpPool=300.0  # Total HP for the group (100 per ship)
+		)
+		
+		self.colony.colonyFleet.append(flanker_fleet)
+		
+		# Update last build time
+		self.last_flanker_build_time = time.time()
+		
+		self._mark_changed()
+		
+		# Log the build event
+		self._add_action_event(f"built a Flanker group ({flanker_group_size} ships)", "build")
+		
+		return flanker_fleet
 
 	def get_unlocked_fleet_types(self) -> List[str]:
 		"""Get the list of fleet types unlocked at the current colony level."""

@@ -196,7 +196,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   // Map fleet types to components. Add more mappings here as new fleet components are created.
   const fleetComponentMap = useMemo(() => ({
     Attacker: FleetAttacker,
-    // Flanker: FleetFlanker,
+    Flanker: FleetAttacker,  // Flankers use the same component, formation handled by count
     // Fighter: FleetFighter,
     // Bomber: FleetBomber,
   } as Record<string, React.ComponentType<FleetComponentProps>>), []);
@@ -339,33 +339,46 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
 
   // Calculate local positions for fleets and select the correct component for each fleet type
   useEffect(() => {
-    if (!planetGroupRef.current) return;
+    if (!planetGroupRef.current || !basePosition || !baseRotation) return;
     if (!colony.colonyFleet || colony.colonyFleet.length === 0) {
       setPlacedFleets([]);
       return;
     }
 
+    const planetGroup = planetGroupRef.current;
     const results: PlacedFleet[] = [];
+
+    // Get the surface normal at the base position
+    const planetCenter = new THREE.Vector3();
+    planetGroup.getWorldPosition(planetCenter);
+    const surfaceNormal = basePosition.clone().sub(planetCenter).normalize();
+    
+    // Spawn height for fleets above the base
+    const fleetSpawnHeight = 3.0;
 
     colony.colonyFleet.forEach((fleet) => {
       const comp = fleetComponentMap[fleet.type] ?? FleetAttacker;
 
-      // Convert fleet world position to local space of the planet group so the fleet component
-      // can be rendered as a child of the planet and follow its transform.
-      //const worldPos = new THREE.Vector3(fleet.position.x, fleet.position.y, fleet.position.z);
-      if(!basePosition) return;
-      const away = basePosition!.clone().sub(new THREE.Vector3(position.x, position.y, position.z)).normalize();
-      const localPos = basePosition!.add(away).addScalar(1);
+      // Position fleet above the colony base along the surface normal
+      const fleetWorldPos = basePosition.clone().add(surfaceNormal.clone().multiplyScalar(fleetSpawnHeight));
+      const localPos = planetGroup.worldToLocal(fleetWorldPos.clone());
       
-      // Pass a copy of the fleet with a zeroed position — the parent <group> will provide the base
-      // transform and the fleet component may then animate relative to that origin.
+      // Pass the fleet as-is - the fleet component will handle rendering multiple ships
+      // based on fleet.count in the correct formation
       const localFleetProp: Fleet = { ...fleet, position: { x: 0, y: 0, z: 0 } };
 
-      results.push({ component: comp, localPosition: localPos.clone(), fleetProp: localFleetProp });
+      results.push({ component: comp, localPosition: localPos, fleetProp: localFleetProp });
     });
 
     setPlacedFleets(results);
-  }, [basePosition, colony.colonyFleet, fleetComponentMap, position.x, position.y, position.z]);
+  }, [colony.colonyFleet, fleetComponentMap, basePosition, baseRotation]);
+
+  // Calculate the inverse of the planet's rotation to keep fleets upright
+  const planetInverseRotation = useMemo(() => {
+    const planetQuat = new THREE.Quaternion();
+    planetQuat.setFromEuler(new THREE.Euler(rot.x, rot.y, rot.z));
+    return planetQuat.invert();
+  }, [rot.x, rot.y, rot.z]);
 
   return (
     <group
@@ -413,7 +426,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
           <group 
             key={`fleet-${pf.fleetProp.id}-${idx}`} 
             position={[pf.localPosition.x, pf.localPosition.y, pf.localPosition.z]}
-            quaternion={[0, 0, 0, 0]}>
+            quaternion={[planetInverseRotation.x, planetInverseRotation.y, planetInverseRotation.z, planetInverseRotation.w]}>
             <FleetComp colonyColor={colonyColor} fleetProp={pf.fleetProp} onUpdate={() => { /* noop for now */ }} />
           </group>
         );

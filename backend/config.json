@@ -22,8 +22,9 @@
     "flanker_group_size": 3,
     "flanker_steel_cost": 300,
     "flanker_oil_cost": 150,
-    "flanker_spawn_height": 5,
-    "flanker_spacing": 2,
+    "flanker_spawn_height": 20,
+    "flanker_spacing": 1.5,
+    "flanker_build_cooldown": 30,
     
     "colony_level_thresholds": {
         "Colony": {
@@ -31,31 +32,36 @@
             "water_storage": 0,
             "steel_storage": 0,
             "oil_storage": 0,
-            "unlocked_fleet_types": ["Flanker"]
+            "unlocked_fleet_types": ["Flanker"],
+            "max_fleet_groups": 1
         },
         "Settlement": {
             "residents": 500,
             "steel_storage": 600,
             "oil_storage": 100,
-            "unlocked_fleet_types": ["Flanker", "Fighter"]
+            "unlocked_fleet_types": ["Flanker", "Fighter"],
+            "max_fleet_groups": 2
         },
         "Township": {
             "residents": 2000,
             "steel_storage": 500,
             "oil_storage": 1000,
-            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker"]
+            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker"],
+            "max_fleet_groups": 4
         },
         "Metropolis": {
             "residents": 5000,
             "steel_storage": 8000,
             "oil_storage": 6000,
-            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"]
+            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"],
+            "max_fleet_groups": 6
         },
         "Starport Hub": {
             "residents": 10000,
             "steel_storage": 15000,
             "oil_storage": 12000,
-            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"]
+            "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"],
+            "max_fleet_groups": 10
         }
     }
 }

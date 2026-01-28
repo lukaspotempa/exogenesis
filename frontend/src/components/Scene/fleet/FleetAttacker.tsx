@@ -129,17 +129,38 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
   });
 
   const count = fleetProp.count ?? 1;
-  const spacing = 0.5; // spacing between ships in formation
+  const spacing = 1.5; // spacing between ships in arrow formation
+
+  // Arrow/V formation offsets for 3 ships:
+  // Ship 0 (leader): front center
+  // Ship 1: left-back
+  // Ship 2: right-back
+  const getFormationOffset = (index: number, totalCount: number): [number, number, number] => {
+    if (totalCount === 1) return [0, 0, 0];
+    
+    if (totalCount === 3) {
+      // Arrow formation
+      const formations: [number, number, number][] = [
+        [0, 0, 0],                              // Leader at front
+        [-spacing, 0, spacing * 0.8],           // Left wingman
+        [spacing, 0, spacing * 0.8],            // Right wingman
+      ];
+      return formations[index] || [0, 0, 0];
+    }
+    
+    // Fallback: line formation for other counts
+    const offsetX = (index - (totalCount - 1) / 2) * spacing;
+    return [offsetX, 0, 0];
+  };
 
   return (
     <group ref={groupRef} dispose={null}>
 
-      {/* Render spaceship models in a simple formation centered on fleet */}
+      {/* Render spaceship models in arrow formation centered on fleet position */}
       {Array.from({ length: count }).map((_, i) => {
-        const offsetX = (i - (count - 1) / 2) * spacing;
-        const offsetZ = Math.abs(i - (count - 1) / 2) * - spacing; // slight depth spread
+        const [offsetX, offsetY, offsetZ] = getFormationOffset(i, count);
         return (
-          <group key={`ship-${i}`} position={[offsetX, 0, offsetZ]}>
+          <group key={`ship-${i}`} position={[offsetX, offsetY, offsetZ]}>
             <SpaceshipFlanker
               colonyColor={colonyColor ?? '#FFFFFF'}
               isAttacking={!!fleetProp.isAttacking}
