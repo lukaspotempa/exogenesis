@@ -1,9 +1,11 @@
-import type { Colony } from '../types/Types';
+import type { Colony, ActionEvent } from '../types/Types';
 
 class ColoniesStore {
     private colonies: Colony[] = [];
     private listeners: (() => void)[] = [];
     private activeColony: Colony | undefined;
+    private actionEvents: ActionEvent[] = [];
+    private maxActionEvents = 50; // Keep last 50 events
 
     setColonies(colonies: Colony[]) {
         this.colonies = colonies;
@@ -92,6 +94,24 @@ class ColoniesStore {
 
     removeActiveColony() {
         this.activeColony = undefined;
+        this.notifyListeners();
+    }
+
+    addActionEvent(event: ActionEvent) {
+        this.actionEvents.push(event);
+        // Keep only the latest events
+        if (this.actionEvents.length > this.maxActionEvents) {
+            this.actionEvents = this.actionEvents.slice(-this.maxActionEvents);
+        }
+        this.notifyListeners();
+    }
+
+    getActionEvents(): ActionEvent[] {
+        return this.actionEvents;
+    }
+
+    clearActionEvents() {
+        this.actionEvents = [];
         this.notifyListeners();
     }
 

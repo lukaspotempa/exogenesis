@@ -5,6 +5,7 @@ import './assets/UI.css'
 import { MainScene } from './components/Scene/MainScene'
 import ColonyList from './components/UI/ColonyList'
 import PlanetDetails from './components/UI/PlanetDetails'
+import ActionLog from './components/UI/ActionLog'
 import { Suspense, useEffect, useState, useRef } from 'react'
 import * as THREE from 'three'
 import { coloniesStore } from './store/coloniesStore'
@@ -114,6 +115,7 @@ function App() {
   const [colonies, setColonies] = useState(() => coloniesStore.getColonies() ?? []);
   const [activeColony, setActiveColony] = useState<Colony | null>(null);
   const [isUserInitiatedChange, setIsUserInitiatedChange] = useState(true);
+  const [actionEvents, setActionEvents] = useState(() => coloniesStore.getActionEvents());
   const controlsRef = useRef<ControlsLike | null>(null);
   const handleControlsRef = (instance: unknown) => {
 
@@ -127,6 +129,9 @@ function App() {
     const unsubscribe = coloniesStore.subscribe(() => {
       const updatedColonies = coloniesStore.getColonies();
       setColonies(updatedColonies);
+      
+      // Update action events
+      setActionEvents(coloniesStore.getActionEvents());
       
       if (activeColony) {
         const updatedActiveColony = updatedColonies.find(colony => colony.id === activeColony.id);
@@ -161,6 +166,12 @@ function App() {
         if (data && data.type === 'update' && Array.isArray(data.changes)) {
           // Delta update; only update changed colonies
           coloniesStore.updateColonies(data.changes);
+          return;
+        }
+        
+        if (data && data.type === 'action' && data.event) {
+          // Action event from backend
+          coloniesStore.addActionEvent(data.event);
           return;
         }
       } catch {
@@ -227,6 +238,9 @@ function App() {
           </div>
           <div className="colony-details-container">
             <PlanetDetails activeColony={activeColony!} setActiveColony={setActiveColony} />
+          </div>
+          <div className="action-log-container">
+            <ActionLog events={actionEvents} />
           </div>
         </div>
         <Canvas shadows>

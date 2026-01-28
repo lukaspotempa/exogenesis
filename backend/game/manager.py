@@ -73,6 +73,7 @@ class GameManager:
 
     def tick(self) -> None:
         changes = []
+        all_action_events = []
         for c in self.colonies:
             try:
                 c.update()
@@ -80,6 +81,10 @@ class GameManager:
                 colony_changes = c.get_changes()
                 if colony_changes:
                     changes.append(colony_changes)
+                
+                # Collect action events from the colony
+                action_events = c.get_action_events()
+                all_action_events.extend(action_events)
             except Exception as e:
                 print(f"Error updating colony: {e}")
                 continue
@@ -87,6 +92,10 @@ class GameManager:
         # Broadcast changes to all connected clients
         if changes and self._connection_manager:
             asyncio.create_task(self._broadcast_changes(changes))
+        
+        # Broadcast action events to all connected clients
+        if all_action_events and self._connection_manager:
+            asyncio.create_task(self._broadcast_action_events(all_action_events))
 
     async def _broadcast_changes(self, changes: List[dict]) -> None:
         """Broadcast colony changes to all connected clients."""
@@ -100,6 +109,19 @@ class GameManager:
         }
         
         await self._connection_manager.broadcast_json(update_message)
+
+    async def _broadcast_action_events(self, events: List[dict]) -> None:
+        """Broadcast action events to all connected clients."""
+        if not self._connection_manager:
+            return
+        
+        # Send each event separately for better real-time feedback
+        for event in events:
+            action_message = {
+                "type": "action",
+                "event": event
+            }
+            await self._connection_manager.broadcast_json(action_message)
 
     def list_colonies(self) -> List[dict]:
         return [c.to_dict() for c in self.colonies]

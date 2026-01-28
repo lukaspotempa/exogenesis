@@ -55,6 +55,7 @@ class Colony:
 		self._previous_state = self.colony.dict()
 		self._has_changes = False
 		self._next_pump_id = 1
+		self._action_events = []  # Track action events for this colony
 
 	def to_dict(self):
 		return self.colony.dict()
@@ -158,6 +159,9 @@ class Colony:
 		self._next_pump_id += 1
 		self.colony.planet.oilPumps.append(pump)
 		self._mark_changed()
+		
+		# Log the build event
+		self._add_action_event(f"built an Oil Pump", "build")
 		
 		return pump
 
@@ -309,6 +313,9 @@ class Colony:
 			self.colony.colonyLevel = next_level
 			self._mark_changed()
 			
+			# Log the level up event
+			self._add_action_event(f"upgraded to {next_level.value}", "level-up")
+			
 			# Optional: Consume resources for upgrade
 			if next_level.value in colony_level_thresholds:
 				thresholds = colony_level_thresholds[next_level.value]
@@ -366,6 +373,25 @@ class Colony:
 	def _mark_changed(self):
 		"""Mark this colony as having changes."""
 		self._has_changes = True
+
+	def _add_action_event(self, message: str, event_type: str = "general"):
+		"""Add an action event for this colony."""
+		import time
+		event = {
+			"id": str(uuid.uuid4()),
+			"timestamp": int(time.time() * 1000),  # milliseconds
+			"colonyId": self.colony.id,
+			"colonyName": self.colony.name,
+			"message": message,
+			"type": event_type
+		}
+		self._action_events.append(event)
+
+	def get_action_events(self) -> List[Dict[str, Any]]:
+		"""Get and clear pending action events."""
+		events = self._action_events.copy()
+		self._action_events.clear()
+		return events
 
 	@classmethod
 	def create_colony(cls, payload: dict, existing_colonies: Optional[List["Colony"]] = None) -> "Colony":

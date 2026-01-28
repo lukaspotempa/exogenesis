@@ -14,6 +14,32 @@
     z-index: 9999;
 }
 
+.action-log-container {
+    position: fixed;
+    bottom: 2vh;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    z-index: 9999;
+}
+
+/* ...existing code... */
+.ColonyList {
+    width: 20vw;
+    position: relative;
+}
+
+.ActionLog {
+    width: 40vw;
+    min-width: 40vw;
+    max-width: 600px;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
 /* ...existing code... */
 .ColonyList {
     width: 20vw;

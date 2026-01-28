@@ -76,3 +76,12 @@ export interface SpaceShip {
 export type FleetState = 'Idle' | 'Moving' | 'Attacking' | 'Retreating' | 'Patrolling' | 'Docking';
 
 export type FleetTactic = 'Offensive' | 'Defensive' | 'Skirmish' | 'Kite' | 'Hold';
+
+export interface ActionEvent {
+    id: string;
+    timestamp: number;
+    colonyId: string;
+    colonyName: string;
+    message: string;
+    type: 'build' | 'upgrade' | 'attack' | 'destroy' | 'level-up' | 'general';
+}

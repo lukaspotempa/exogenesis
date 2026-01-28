@@ -20,7 +20,10 @@ const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyCo
 
 const HEIGHT_OFFSET: Record<string, number> = {
   'Colony': -0.03,
-  'Metropolis': 0.35
+  'Settlement': -0.05,
+  'Township': 0.35,
+  'Metropolis': 0.35,
+  'Starport Hub': 0.35
 };
 
 // Get the appropriate base structure component for a given colony level
@@ -254,9 +257,10 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
         const finalQuat = combineRotations(quat, obj.rotation);
         const localQuat = groupWorldQuat.clone().invert().multiply(finalQuat);
         
-        
+        // Get height offset with fallback to 0 for unknown colony levels
+        const heightOffset = HEIGHT_OFFSET[colony.colonyLevel] ?? 0;
         const worldPos = raycastResult.point.add(raycastResult.normal.clone()
-        .multiplyScalar(HEIGHT_OFFSET[colony.colonyLevel]));
+        .multiplyScalar(heightOffset));
         const localPos = planetGroup.worldToLocal(worldPos.clone());
 
         results.push({ 

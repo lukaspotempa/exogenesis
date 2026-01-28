@@ -40,7 +40,7 @@ const OilPump = ({ colonyColor }: { colonyColor?: string }): React.JSX.Element =
         castShadow
         material={materials.Material_73}
         scale={0.001}
-        position={[0, 0.18, 0]}
+        position={[0, 0.1, 0]}
       >
       </mesh>
     </group>

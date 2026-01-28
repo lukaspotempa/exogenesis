@@ -19,6 +19,12 @@
     "oil_pump_steel_cost": 200,
     "oil_pump_max_per_planet": 3,
     
+    "flanker_group_size": 3,
+    "flanker_steel_cost": 300,
+    "flanker_oil_cost": 150,
+    "flanker_spawn_height": 5,
+    "flanker_spacing": 2,
+    
     "colony_level_thresholds": {
         "Colony": {
             "residents": 0,
@@ -29,28 +35,24 @@
         },
         "Settlement": {
             "residents": 500,
-            "water_storage": 2000,
-            "steel_storage": 1500,
-            "oil_storage": 1000,
+            "steel_storage": 600,
+            "oil_storage": 100,
             "unlocked_fleet_types": ["Flanker", "Fighter"]
         },
         "Township": {
             "residents": 2000,
-            "water_storage": 5000,
-            "steel_storage": 4000,
-            "oil_storage": 3000,
+            "steel_storage": 500,
+            "oil_storage": 1000,
             "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker"]
         },
         "Metropolis": {
             "residents": 5000,
-            "water_storage": 10000,
             "steel_storage": 8000,
             "oil_storage": 6000,
             "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"]
         },
         "Starport Hub": {
             "residents": 10000,
-            "water_storage": 20000,
             "steel_storage": 15000,
             "oil_storage": 12000,
             "unlocked_fleet_types": ["Flanker", "Fighter", "Attacker", "Bomber"]
