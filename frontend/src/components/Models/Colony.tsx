@@ -359,13 +359,35 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     colony.colonyFleet.forEach((fleet) => {
       const comp = fleetComponentMap[fleet.type] ?? FleetAttacker;
 
-      // Position fleet above the colony base along the surface normal
-      const fleetWorldPos = basePosition.clone().add(surfaceNormal.clone().multiplyScalar(fleetSpawnHeight));
-      const localPos = planetGroup.worldToLocal(fleetWorldPos.clone());
+      // The fleet container should be at the planet origin, because fleet.position
+      // (converted to local space) is relative to the planet center.
+      const localPos = new THREE.Vector3(0, 0, 0);
       
-      // Pass the fleet as-is - the fleet component will handle rendering multiple ships
-      // based on fleet.count in the correct formation
-      const localFleetProp: Fleet = { ...fleet, position: { x: 0, y: 0, z: 0 } };
+      // Get planet's world rotation for transforming vectors from world to local space
+      const planetWorldQuat = new THREE.Quaternion();
+      planetGroup.getWorldQuaternion(planetWorldQuat);
+      const planetWorldQuatInverse = planetWorldQuat.clone().invert();
+      
+      // Convert world space position to local planet space for rendering
+      const worldFleetPos = new THREE.Vector3(fleet.position.x, fleet.position.y, fleet.position.z);
+      const localFleetPos = planetGroup.worldToLocal(worldFleetPos.clone());
+      
+      // Convert world space velocity to local planet space
+      // Velocity is a direction vector, so we only apply rotation (not translation)
+      const worldVelocity = new THREE.Vector3(fleet.velocity.x, fleet.velocity.y, fleet.velocity.z);
+      const localVelocity = worldVelocity.clone().applyQuaternion(planetWorldQuatInverse);
+      
+      const localFleetProp: Fleet = { 
+        ...fleet, 
+        position: { x: localFleetPos.x, y: localFleetPos.y, z: localFleetPos.z },
+        velocity: { x: localVelocity.x, y: localVelocity.y, z: localVelocity.z },
+        // Also convert waypoints to local space if they exist
+        waypoints: fleet.waypoints?.map(wp => {
+          const worldWP = new THREE.Vector3(wp.x, wp.y, wp.z);
+          const localWP = planetGroup.worldToLocal(worldWP.clone());
+          return { x: localWP.x, y: localWP.y, z: localWP.z };
+        })
+      };
 
       results.push({ component: comp, localPosition: localPos, fleetProp: localFleetProp });
     });

@@ -40,7 +40,7 @@ class GameManager:
     def clear_colonies(self):
         self.colonies.clear()
 
-    async def start_game_loop(self, interval: float = 0.5) -> None:
+    async def start_game_loop(self, interval: float = 0.05) -> None:
         """Start a background task that calls tick() every `interval` seconds.
         """
         if self._loop_task is not None and not self._loop_task.done():
@@ -50,7 +50,7 @@ class GameManager:
             try:
                 while True:
                     try:
-                        self.tick()
+                        self.tick(delta_time=interval)
                     except Exception:
                         # swallow exceptions from tick to keep loop alive
                         pass
@@ -71,12 +71,12 @@ class GameManager:
             pass
         self._loop_task = None
 
-    def tick(self) -> None:
+    def tick(self, delta_time: float = 0.5) -> None:
         changes = []
         all_action_events = []
         for c in self.colonies:
             try:
-                c.update()
+                c.update(delta_time)
                 # Check for changes after update
                 colony_changes = c.get_changes()
                 if colony_changes:

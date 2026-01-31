@@ -59,6 +59,11 @@ export interface Fleet {
     hpPool?: number;   
     target?: { id?: string; position?: { x: number; y: number; z?: number } };
     isAttacking?: boolean;
+    waypoints?: { x: number, y: number, z: number }[];  // Patrol waypoints
+    homePosition?: { x: number, y: number, z: number };  // Home/spawn position
+    speed?: number;  // Movement speed
+    maxHP?: number;  // Max HP per ship
+    damage?: number;  // Damage per ship
 }
 
 export interface FleetOrder {

@@ -49,6 +49,13 @@ class Planet(BaseModel):
     oilPumps: Optional[List[OilPump]] = None
 
 
+class ColonyTrait(str, Enum):
+    Pacifist = 'Pacifist'
+    Aggressive = 'Aggressive'
+    Defensive = 'Defensive'
+    Economic = 'Economic'
+
+
 class ColonyLevel(str, Enum):
     Colony = 'Colony'
     Settlement = 'Settlement'
@@ -81,8 +88,13 @@ class Fleet(BaseModel):
     order: Optional[FleetOrder] = None
     leaderId: Optional[str] = None
     hpPool: Optional[float] = None
+    maxHP: Optional[float] = None
+    damage: Optional[float] = None
+    speed: Optional[float] = None
     target: Optional[FleetTarget] = None
     isAttacking: Optional[bool] = False
+    waypoints: Optional[List[Vector3]] = None
+    homePosition: Optional[Vector3] = None
 
 
 class ColonyModel(BaseModel):
@@ -92,6 +104,7 @@ class ColonyModel(BaseModel):
     color: str
     planet: Planet
     colonyLevel: ColonyLevel
+    trait: Optional[str] = None
     colonyFleet: Optional[List[Fleet]] = None
 
 

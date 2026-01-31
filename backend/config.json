@@ -2,6 +2,7 @@
     "defaultResidents": 100,
     "resident_update_interval": 5,
     "colony_min_distance": 40,
+    "planet_model_radius": 15.0,
     "residents_base_growth": 10,
     "space_generation_range": {"min": -100, "max": 100},
     
@@ -22,9 +23,36 @@
     "flanker_group_size": 3,
     "flanker_steel_cost": 300,
     "flanker_oil_cost": 150,
-    "flanker_spawn_height": 20,
+    "flanker_spawn_height": 5,
     "flanker_spacing": 1.5,
     "flanker_build_cooldown": 30,
+    
+    "fleet_stats": {
+        "Flanker": {
+            "speed": 1.5,
+            "maxHP": 100.0,
+            "damage": 15.0,
+            "patrol_radius": 15.0
+        },
+        "Fighter": {
+            "speed": 2.0,
+            "maxHP": 75.0,
+            "damage": 20.0,
+            "patrol_radius": 18.0
+        },
+        "Attacker": {
+            "speed": 1.0,
+            "maxHP": 150.0,
+            "damage": 25.0,
+            "patrol_radius": 12.0
+        },
+        "Bomber": {
+            "speed": 0.8,
+            "maxHP": 80.0,
+            "damage": 40.0,
+            "patrol_radius": 10.0
+        }
+    },
     
     "colony_level_thresholds": {
         "Colony": {

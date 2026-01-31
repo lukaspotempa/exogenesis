@@ -32,10 +32,29 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
   // Keep a mutable ref to the fleet for local animation and diffs
   const fleetRef = useRef<Fleet>(fleetProp) as RefObject<Fleet>;
   const groupRef = useRef<Group | null>(null);
+  const orbitRadiusRef = useRef<number>(0);
 
   // Ensure ref stays in sync if parent replaces fleetProp reference
   useEffect(() => {
     fleetRef.current = fleetProp;
+    
+    // When a new authoritative update arrives:
+    if (groupRef.current) {
+      const serverPos = new THREE.Vector3(fleetProp.position.x, fleetProp.position.y, fleetProp.position.z);
+      
+      // 1. Update intended orbit radius based on server position
+      orbitRadiusRef.current = serverPos.length();
+      
+      // 2. Drift Check (Snap if too far)
+      const dist = groupRef.current.position.distanceTo(serverPos);
+      if (dist > 5.0) {
+          // Large discrepancy (teleport or packet loss), snap immediately
+          groupRef.current.position.copy(serverPos);
+      }
+      // If distance is small, we mostly IGNORE the server position (except orbit radius)
+      // and continue our smooth local simulation. The server update primarily serves
+      // to update the velocity vector (which fleetRef picked up above).
+    }
   }, [fleetProp]);
 
   // keep fleetRef in sync when parent replaces fleetProp
@@ -44,6 +63,14 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
   useFrame((_, delta) => {
     const f = fleetRef.current;
     if (!f) return;
+    
+    // Initialize orbit radius if not set
+    if (orbitRadiusRef.current === 0 && groupRef.current) {
+        // Use current visual position length if we have nothing else
+        const len = groupRef.current.position.length();
+        if (len > 0.1) orbitRadiusRef.current = len;
+        else orbitRadiusRef.current = 15.0; // Fallback
+    }
 
     // Handle Move order: compute desired velocity toward the order's targetPos (world space)
     if (f.order?.type === 'Move' && f.order.targetPos && groupRef.current) {
@@ -105,31 +132,66 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
       }
     }
 
-    // integrate velocity
-    const newPos = {
-      x: f.position.x + f.velocity.x * delta,
-      y: f.position.y + f.velocity.y * delta,
-      z: f.position.z + (f.velocity.z ?? 0) * delta,
-    };
-
-    // cheap equality check
-    const moved = newPos.x !== f.position.x || newPos.y !== f.position.y || newPos.z !== f.position.z;
-    if (moved) {
-      // mutate local ref
-      f.position = newPos;
-      // bubble the update to parent so top-level app can persist/forward it
-      onUpdate?.({ ...f });
-    }
-
+    // Smoother Movement Logic: "Pure Client Prediction"
+    // We rely entirely on the velocity vector to drive the animation.
+    // We do NOT reconcile against server position every frame, avoiding jitter.
+    // Drifts are corrected only on large discrepancies (handled in useEffect).
     if (groupRef.current) {
-      groupRef.current.position.set(f.position.x, f.position.y, f.position.z);
+       // Step 1: Integrate Velocity (Prediction)
+       const vx = f.velocity.x;
+       const vy = f.velocity.y;
+       const vz = f.velocity.z ?? 0;
+       
+       groupRef.current.position.x += vx * delta;
+       groupRef.current.position.y += vy * delta;
+       groupRef.current.position.z += vz * delta;
+
+       // Step 2: Orbit Constraint
+       // Force the ship to stay on its designated orbital shell.
+       // This prevents "cutting through" the sphere due to linear movement.
+       const currentLen = groupRef.current.position.length();
+       if (orbitRadiusRef.current > 0 && currentLen > 0.001) {
+           // Normalize and scale to orbit radius
+           groupRef.current.position.multiplyScalar(orbitRadiusRef.current / currentLen);
+       }
+       
+      // Rotate fleet to face direction of travel based on velocity
+      const velocityMagnitude = Math.sqrt(
+        f.velocity.x * f.velocity.x + 
+        f.velocity.y * f.velocity.y + 
+        (f.velocity.z ?? 0) * (f.velocity.z ?? 0)
+      );
+      
+      // Only rotate if fleet is actually moving
+      if (velocityMagnitude > 0.01) {
+        // Calculate target rotation based on velocity direction
+        const targetDirection = new THREE.Vector3(
+          f.velocity.x,
+          f.velocity.y,
+          f.velocity.z ?? 0
+        ).normalize();
+        
+        // Create a quaternion that looks in the direction of movement
+        // Using lookAt with up vector pointing up (0, 1, 0)
+        const currentPos = new THREE.Vector3(0, 0, 0);
+        const lookAtTarget = currentPos.clone().add(targetDirection);
+        const upVector = new THREE.Vector3(0, 1, 0);
+        
+        const lookMatrix = new THREE.Matrix4().lookAt(lookAtTarget, currentPos, upVector);
+        const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookMatrix);
+        
+        // Smoothly interpolate rotation (slerp) for smooth turning
+        const rotationSpeed = 0.5; // Optimized for smooth majestic turns
+        const t = Math.min(1, delta * rotationSpeed);
+        groupRef.current.quaternion.slerp(targetQuaternion, t);
+      }
     }
 
     // fleet movement integration remains here; projectiles are handled by individual ships
   });
 
   const count = fleetProp.count ?? 1;
-  const spacing = 1.5; // spacing between ships in arrow formation
+  const spacing = 0.6;
 
   // Arrow/V formation offsets for 3 ships:
   // Ship 0 (leader): front center
