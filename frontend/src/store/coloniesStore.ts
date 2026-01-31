@@ -96,6 +96,15 @@ class ColoniesStore {
         this.activeColony = undefined;
         this.notifyListeners();
     }
+    
+    setActionEvents(events: ActionEvent[]) {
+        this.actionEvents = events;
+        // Ensure strictly chronological or keep last X if needed
+        if (this.actionEvents.length > this.maxActionEvents) {
+            this.actionEvents = this.actionEvents.slice(-this.maxActionEvents);
+        }
+        this.notifyListeners();
+    }
 
     addActionEvent(event: ActionEvent) {
         this.actionEvents.push(event);

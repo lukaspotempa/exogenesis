@@ -15,8 +15,8 @@ export default function ActionLog({ events }: Props) {
     }
   }, [events])
 
-  // Show latest 8 events
-  const displayedEvents = events.slice(-8)
+  // Show all available events (store limits this to 50)
+  const displayedEvents = events
 
   const getEventIcon = (type: ActionEvent['type']) => {
     switch (type) {

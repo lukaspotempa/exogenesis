@@ -59,7 +59,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = data
             if isinstance(payload, dict) and payload.get("initialConnection"):
                 snapshot = game_manager.list_colonies()
-                await websocket.send_json({"type": "snapshot", "colonies": snapshot})
+                history = game_manager.get_action_history()
+                await websocket.send_json({"type": "snapshot", "colonies": snapshot, "actionEvents": history})
                 continue
 
             try:

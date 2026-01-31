@@ -41,7 +41,6 @@ const SteelFactory = ({ colonyColor }: { colonyColor?: string }): React.JSX.Elem
         scale={0.005} 
         position={[0, 0, 0]}
       >
-        {colonyColor && <meshBasicMaterial color={colonyColor} />}
       </mesh>
     </group>
   );

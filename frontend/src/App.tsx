@@ -158,6 +158,11 @@ function App() {
         if (data && data.type === 'snapshot' && Array.isArray(data.colonies)) {
           // Initial snapshot - update the global store and local state
           coloniesStore.setColonies(data.colonies);
+          
+          if (data.actionEvents && Array.isArray(data.actionEvents)) {
+            coloniesStore.setActionEvents(data.actionEvents);
+          }
+          
           setColonies(data.colonies as Colony[]);
           setActiveColony((data.colonies as Colony[])?.[0] ?? null);
           return;

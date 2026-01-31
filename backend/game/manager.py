@@ -16,6 +16,7 @@ class GameManager:
     def __init__(self):
         self.colonies: List[Colony] = []
         self._connection_manager = None
+        self.action_history: List[dict] = []  # Store global action history
 
     def set_connection_manager(self, connection_manager):
         """Set the connection manager for broadcasting updates."""
@@ -89,6 +90,13 @@ class GameManager:
                 print(f"Error updating colony: {e}")
                 continue
         
+        # Update global history
+        if all_action_events:
+            self.action_history.extend(all_action_events)
+            # Keep only the last 50 events
+            if len(self.action_history) > 50:
+                self.action_history = self.action_history[-50:]
+        
         # Broadcast changes to all connected clients
         if changes and self._connection_manager:
             asyncio.create_task(self._broadcast_changes(changes))
@@ -125,6 +133,9 @@ class GameManager:
 
     def list_colonies(self) -> List[dict]:
         return [c.to_dict() for c in self.colonies]
+
+    def get_action_history(self) -> List[dict]:
+        return self.action_history
 
     def create_colony(self, payload: dict) -> dict:
         try:
