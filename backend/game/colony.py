@@ -3,7 +3,7 @@ import random
 import math
 import numpy as np
 from typing import Optional, List, Dict, Any
-from models import ColonyModel, Fleet, ColonyLevel, ColonyTrait, OilPump, Vector2, Vector3
+from models import ColonyModel, Fleet, ColonyLevel, ColonyTrait, OilPump, SteelFactory, Vector2, Vector3
 import time
 from pathlib import Path
 import json
@@ -29,7 +29,9 @@ base_growth_rate = _CONFIG.get("base_growth_rate", 20)
 water_growth_multiplier = _CONFIG.get("water_growth_multiplier", 1.5)
 building_capacity_per_steel = _CONFIG.get("building_capacity_per_steel", 50)
 building_capacity_per_oil = _CONFIG.get("building_capacity_per_oil", 30)
-initial_resource_storage = _CONFIG.get("initial_resource_storage", 1000.0)
+initial_steel_storage = _CONFIG.get("initial_steel_storage", 600.0)
+initial_oil_storage = _CONFIG.get("initial_oil_storage", 250.0)
+initial_water_storage = _CONFIG.get("initial_water_storage", 300.0)
 
 # Colony level thresholds
 colony_level_thresholds = _CONFIG.get("colony_level_thresholds", {})
@@ -37,6 +39,13 @@ colony_level_thresholds = _CONFIG.get("colony_level_thresholds", {})
 # Oil pump configuration
 oil_pump_steel_cost = _CONFIG.get("oil_pump_steel_cost", 500)
 oil_pump_max_per_planet = _CONFIG.get("oil_pump_max_per_planet", 3)
+
+# Steel factory configuration
+steel_factory_oil_cost = _CONFIG.get("steel_factory_oil_cost", 200)
+steel_factory_max_per_planet = _CONFIG.get("steel_factory_max_per_planet", 3)
+
+# Building placement configuration
+min_building_distance = _CONFIG.get("min_building_distance", 12.0)
 
 # Flanker configuration
 flanker_group_size = _CONFIG.get("flanker_group_size", 3)
@@ -64,13 +73,52 @@ class Colony:
 		self._previous_state = self.colony.dict()
 		self._has_changes = False
 		self._next_pump_id = 1
+		self._next_factory_id = 1
 		self._action_events = []  # Track action events for this colony
+		self.last_structure_build_time = 0 # Track last time any structure was built
 		self.last_flanker_build_time = 0  # Track last time flankers were built
 		self._fleet_patrol_cooldowns = {}  # Track when each fleet last got new patrol waypoints
 		self._fleet_waypoint_timers = {}  # Track when each waypoint was set for time-based rotation
 
 	def to_dict(self):
 		return self.colony.dict()
+
+	def _distance_v2(self, p1: Vector2, p2: Vector2) -> float:
+		"""Calculate euclidean distance between two Vector2 points."""
+		return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+
+	def _is_position_valid(self, position: Vector2, min_dist: float) -> bool:
+		"""Check if a position is valid (not too close to other structures)."""
+		# Check base
+		base = self.colony.planet.planetMainBase
+		if self._distance_v2(position, base) < min_dist:
+			return False
+		
+		# Check oil pumps
+		if self.colony.planet.oilPumps:
+			for pump in self.colony.planet.oilPumps:
+				if self._distance_v2(position, pump.position) < min_dist:
+					return False
+		
+		# Check steel factories
+		if self.colony.planet.steelFactories:
+			for fac in self.colony.planet.steelFactories:
+				if self._distance_v2(position, fac.position) < min_dist:
+					return False
+					
+		return True
+
+	def _get_random_valid_position(self) -> Optional[Vector2]:
+		"""Try to find a valid position for a new building."""
+		for _ in range(20):  # Try 20 times
+			# Same generation range as original: X: -1 to 1, Y: -50 to 50
+			pos = Vector2(
+				x=float(random.uniform(-1.0, 1.0)), 
+				y=float(random.uniform(-50.0, 50.0))
+			)
+			if self._is_position_valid(pos, min_building_distance):
+				return pos
+		return None
 
 	def add_fleet(self, fleet: Fleet):
 		if self.colony.colonyFleet is None:
@@ -109,6 +157,8 @@ class Colony:
 			self.accumulate_resources(time_since_last_update)
 			# Produce oil from oil pumps
 			self.produce_oil_from_pumps(time_since_last_update)
+			# Produce steel from steel factories
+			self.produce_steel_from_factories(time_since_last_update)
 			# Calculate and apply resident growth/consumption
 			self.increase_residents()
 			# Check for colony level upgrades
@@ -165,6 +215,10 @@ class Colony:
 		if not self.can_build_oil_pump():
 			return None
 		
+		# Validate cooldown (safety check, though usually handled in auto_build)
+		# But since this can be called manually or in a loop, let's update timestamp here
+		self.last_structure_build_time = time.time()
+
 		# Deduct steel cost
 		self.colony.planet.planetNaturalResources.steelStorage -= oil_pump_steel_cost
 		
@@ -172,11 +226,21 @@ class Colony:
 		if self.colony.planet.oilPumps is None:
 			self.colony.planet.oilPumps = []
 		
-		# Create oil pump at random position
+		# Find a valid position
+		position = self._get_random_valid_position()
+		if position is None:
+			# Could not find a valid position (too crowded)
+			# Even if we can afford it, we can't build it
+			# Refund cost if we deducted it? Or safer to check position before deducting
+			# Let's revert the cost deduction
+			self.colony.planet.planetNaturalResources.steelStorage += oil_pump_steel_cost
+			return None
+
+		# Create oil pump at validated position
 		# Production rate is based on planet's natural oil generation rate
 		pump = OilPump(
 			id=str(self._next_pump_id),
-			position=Vector2(x=float(random.uniform(-1.0, 1.0)), y=float(random.uniform(-50.0, 50.0))),
+			position=position,
 			production=self.colony.planet.planetNaturalResources.oil
 		)
 		
@@ -200,6 +264,90 @@ class Colony:
 		# Add oil production from each pump
 		for pump in self.colony.planet.oilPumps:
 			self.colony.planet.planetNaturalResources.oilStorage += pump.production * ticks
+		
+		self._mark_changed()
+
+	def can_build_steel_factory(self) -> bool:
+		"""Check if the colony can build a steel factory."""
+		# Must be at least Settlement level
+		try:
+			current_index = COLONY_LEVEL_ORDER.index(self.colony.colonyLevel)
+			# Settlement is index 1
+			if current_index < 1:
+				return False
+		except ValueError:
+			return False
+		
+		# Check if we haven't reached max factories
+		if self.colony.planet.steelFactories is None:
+			self.colony.planet.steelFactories = []
+		
+		try:
+			if len(self.colony.planet.steelFactories) >= steel_factory_max_per_planet:
+				return False
+		except TypeError:
+			# Handle case where steelFactories might be implicitly None or invalid
+			self.colony.planet.steelFactories = []
+		
+		# Check if we have enough oil
+		if self.colony.planet.planetNaturalResources.oilStorage < steel_factory_oil_cost:
+			return False
+		
+		return True
+
+	def build_steel_factory(self) -> Optional[SteelFactory]:
+		"""Build a steel factory if possible."""
+		if not self.can_build_steel_factory():
+			return None
+		
+		# Update timestamp
+		self.last_structure_build_time = time.time()
+		
+		# Deduct oil cost
+		self.colony.planet.planetNaturalResources.oilStorage -= steel_factory_oil_cost
+		
+		# Initialize steelFactories list if needed
+		if self.colony.planet.steelFactories is None:
+			self.colony.planet.steelFactories = []
+		
+		# Find a valid position
+		position = self._get_random_valid_position()
+		if position is None:
+			# Could not find a valid position (too crowded)
+			# Revert cost
+			self.colony.planet.planetNaturalResources.oilStorage += steel_factory_oil_cost
+			return None
+
+		# Create steel factory at validated position
+		# Production rate is based on planet's natural steel generation rate
+		factory = SteelFactory(
+			id=str(self._next_factory_id),
+			# Use the same positioning logic as oil pumps or vary it?
+			# Oil pumps use: position=Vector2(x=float(random.uniform(-1.0, 1.0)), y=float(random.uniform(-50.0, 50.0)))
+			position=position,
+			production=self.colony.planet.planetNaturalResources.steel
+		)
+		
+		self._next_factory_id += 1
+		self.colony.planet.steelFactories.append(factory)
+		self._mark_changed()
+		
+		# Log the build event
+		self._add_action_event(f"built a Steel Factory", "build")
+		
+		return factory
+
+	def produce_steel_from_factories(self, time_delta: float):
+		"""Produce steel from all steel factories."""
+		if not self.colony.planet.steelFactories:
+			return
+		
+		# Calculate how many tick intervals have passed
+		ticks = time_delta / resident_update_interval
+		
+		# Add steel production from each factory
+		for factory in self.colony.planet.steelFactories:
+			self.colony.planet.planetNaturalResources.steelStorage += factory.production * ticks
 		
 		self._mark_changed()
 	def _get_planet_base_position(self) -> Vector3:
@@ -419,26 +567,45 @@ class Colony:
 	
 	def auto_build_structures(self):
 		"""Automatically build structures based on colony needs, resources, and trait."""
+		# Check global build cooldown (prevent instant spam)
+		# Allow at least 2 seconds between builds
+		if time.time() - self.last_structure_build_time < 2.0:
+			return
+			
+		# Add "noise" - 30% chance to do nothing this tick even if ready
+		if random.random() < 0.3:
+			return
+
 		trait = self.colony.trait
+		
+		# Helper to try building any economic structure
+		def try_build_economy():
+			# Shuffle order to not prioritize one over another always
+			options = ["pump", "factory"]
+			random.shuffle(options)
+			
+			for opt in options:
+				if opt == "pump" and self.can_build_oil_pump():
+					self.build_oil_pump()
+					return True
+				elif opt == "factory" and self.can_build_steel_factory():
+					self.build_steel_factory()
+					return True
+			return False
 		
 		# Pacifist: Only builds economic structures, never fleets
 		if trait == ColonyTrait.Pacifist.value:
-			while self.can_build_oil_pump():
-				pump = self.build_oil_pump()
-				if pump is None:
-					break
+			try_build_economy()
 			return  # Never build fleets
 		
-		# Economic: Heavily favors economic structures (80% chance to prioritize pumps)
+		# Economic: Heavily favors economic structures (80% chance to prioritize economy)
 		elif trait == ColonyTrait.Economic.value:
-			# Build pumps first with high priority
-			if self.can_build_oil_pump() and random.random() < 0.8:
-				while self.can_build_oil_pump():
-					pump = self.build_oil_pump()
-					if pump is None:
-						break
-			# Small chance to build fleets (20%)
-			elif self.can_build_flanker_group() and random.random() < 0.2:
+			if random.random() < 0.8:
+				if try_build_economy():
+					return
+			
+			# If didn't build economy (either chance or cannot), maybe build fleet
+			if self.can_build_flanker_group() and random.random() < 0.2:
 				self.build_flanker_group()
 		
 		# Aggressive: Heavily favors fleets (70% chance to prioritize fleets)
@@ -447,18 +614,16 @@ class Colony:
 			if self.can_build_flanker_group() and random.random() < 0.7:
 				self.build_flanker_group()
 			# Still build some economic structures (30%)
-			elif self.can_build_oil_pump():
-				pump = self.build_oil_pump()
+			else:
+				try_build_economy()
 		
 		# Defensive: Balanced approach (50/50 split between economy and defense)
 		elif trait == ColonyTrait.Defensive.value:
 			# Random choice between building economic or military
 			if random.random() < 0.5:
 				# Build economic
-				if self.can_build_oil_pump():
-					pump = self.build_oil_pump()
-				else:
-					# Fallback to fleet if can't build pump
+				if not try_build_economy():
+					# Fallback to fleet if can't build economy
 					if self.can_build_flanker_group():
 						self.build_flanker_group()
 			else:
@@ -467,16 +632,20 @@ class Colony:
 					self.build_flanker_group()
 				else:
 					# Fallback to economic if can't build fleet
-					if self.can_build_oil_pump():
-						pump = self.build_oil_pump()
+					try_build_economy()
 		
 		# Default behavior if no trait matched
 		else:
-			# Balanced approach
-			if self.can_build_oil_pump():
-				pump = self.build_oil_pump()
-			if self.can_build_flanker_group():
-				self.build_flanker_group()
+			# Balanced approach. Try to build one thing.
+			if random.random() < 0.5:
+				if not try_build_economy():
+					if self.can_build_flanker_group():
+						self.build_flanker_group()
+			else:
+				if self.can_build_flanker_group():
+					self.build_flanker_group()
+				else:
+					try_build_economy()
 
 	def update_fleets(self, delta_time: float):
 		"""Update all fleet positions and behaviors."""
@@ -552,8 +721,6 @@ class Colony:
 		distance = math.sqrt(dx*dx + dy*dy + dz*dz)
 		
 		# Check if reached waypoint (within a small tolerance)
-		# Tolerance depends on speed and delta_time to avoid overshooting
-		# With high tick rate, 0.5 to 1.0 is reasonable
 		arrival_threshold = 1.0
 		
 		if distance <= arrival_threshold:
@@ -732,6 +899,11 @@ class Colony:
 		
 		# Check cooldown
 		if time.time() - self.last_flanker_build_time < flanker_build_cooldown:
+			return False
+			
+		# REQUIREMENT: Must have at least one oil pump to build fleets
+		# This ensures they have established some infrastructure first
+		if not self.colony.planet.oilPumps or len(self.colony.planet.oilPumps) < 1:
 			return False
 		
 		# Check max fleet groups limit
@@ -957,9 +1129,9 @@ class Colony:
 					"steel": float(random.uniform(0.0, 2.0)),
 					"water": float(random.uniform(0.0, 2.0)),
 					"temperature": float(random.uniform(0.0, 30.0)),
-					"oilStorage": initial_resource_storage,
-					"steelStorage": initial_resource_storage,
-					"waterStorage": initial_resource_storage,
+					"oilStorage": initial_oil_storage,
+					"steelStorage": initial_steel_storage,
+					"waterStorage": initial_water_storage,
 				},
 			}
 			_payload['planet'] = planet

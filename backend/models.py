@@ -38,6 +38,12 @@ class OilPump(BaseModel):
     production: float = 0.0  # Oil produced per tick (0-2)
 
 
+class SteelFactory(BaseModel):
+    id: str
+    position: Vector2
+    production: float = 0.0  # Steel produced per tick
+
+
 class Planet(BaseModel):
     position: Vector3
     scale: float
@@ -47,6 +53,7 @@ class Planet(BaseModel):
     planetNaturalResources: NaturalResources
     planetResourceStation: Optional[List[ResourceStation]] = None
     oilPumps: Optional[List[OilPump]] = None
+    steelFactories: Optional[List[SteelFactory]] = None
 
 
 class ColonyTrait(str, Enum):

@@ -8,6 +8,7 @@ import { ColonyMetropolis } from './structures/ColonyMetropolis';
 import { ColonySettlement } from './structures/ColonySettlement';
 import { BaseFlag } from './structures/BaseFlag';
 import { OilPump } from './structures/OilPump';
+import { SteelFactory } from './structures/SteelFactory';
 
 // Map colony levels to their corresponding base structure components
 const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyColor?: string }>> = {
@@ -80,6 +81,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   const [placedStructures, setPlacedStructures] = useState<PlacedStructure[]>([]);
   const [placedFleets, setPlacedFleets] = useState<PlacedFleet[]>([]);
   const [placedOilPumps, setPlacedOilPumps] = useState<PlacedStructure[]>([]);
+  const [placedSteelFactories, setPlacedSteelFactories] = useState<PlacedStructure[]>([]);
 
   // Define structures to be placed at the colony site.
   const colonyObjects: StructureConfig[] = useMemo(() => [
@@ -337,6 +339,58 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     calculateSphericalDirection
   ]);
 
+  // Calculate positions for steel factories
+  useEffect(() => {
+    if (!planetGroupRef.current || !colony.planet.steelFactories || colony.planet.steelFactories.length === 0) {
+      setPlacedSteelFactories([]);
+      return;
+    }
+
+    const planetGroup = planetGroupRef.current;
+    const planetMesh = setupPlanetMesh(planetGroup);
+    
+    if (!planetMesh) {
+      console.warn('Planet surface mesh not ready for placing steel factories');
+      return;
+    }
+
+    const planetCenter = new THREE.Vector3();
+    planetGroup.getWorldPosition(planetCenter);
+
+    const groupWorldQuat = new THREE.Quaternion();
+    planetGroup.getWorldQuaternion(groupWorldQuat);
+
+    const results: PlacedStructure[] = [];
+
+    colony.planet.steelFactories.forEach((factory) => {
+      const direction = calculateSphericalDirection(factory.position.x, factory.position.y);
+      const raycastResult = raycastToSurface(planetGroup, planetMesh, direction);
+
+      if (raycastResult) {
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), raycastResult.normal);
+        const localQuat = groupWorldQuat.clone().invert().multiply(quat);
+        
+        const worldPos = raycastResult.point.add(raycastResult.normal.clone().multiplyScalar(BASE_OFFSET));
+        const localPos = planetGroup.worldToLocal(worldPos.clone());
+
+        results.push({ 
+          component: SteelFactory, 
+          position: localPos, 
+          quaternion: localQuat 
+        });
+      } else {
+        console.warn('Raycast failed for steel factory', factory);
+      }
+    });
+
+    setPlacedSteelFactories(results);
+  }, [
+    colony.planet.steelFactories,
+    setupPlanetMesh,
+    raycastToSurface,
+    calculateSphericalDirection
+  ]);
+
   // Calculate local positions for fleets and select the correct component for each fleet type
   useEffect(() => {
     if (!planetGroupRef.current || !basePosition || !baseRotation) return;
@@ -433,6 +487,21 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
         return (
           <group 
             key={`oil-pump-${index}`} 
+            position={[p.x, p.y, p.z]} 
+            quaternion={[q.x, q.y, q.z, q.w]}
+          >
+            <Component colonyColor={colonyColor} />
+          </group>
+        );
+      })}
+
+      {/* Steel Factories placed via raycast */}
+      {placedSteelFactories.map((factory, index) => {
+        const Component = factory.component;
+        const { position: p, quaternion: q } = factory;
+        return (
+          <group 
+            key={`steel-factory-${index}`} 
             position={[p.x, p.y, p.z]} 
             quaternion={[q.x, q.y, q.z, q.w]}
           >

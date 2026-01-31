@@ -19,6 +19,7 @@ export interface Planet {
     planetNaturalResources: NaturalResources;
     planetResourceStation?: ResourceStation[];
     oilPumps?: OilPump[];
+    steelFactories?: SteelFactory[];
 }
 
 export interface NaturalResources {
@@ -43,6 +44,12 @@ export interface OilPump {
 }
 
 export type ColonyLevel = 'Colony' | 'Settlement' | 'Township' | 'Metropolis' | 'Starport Hub';
+
+export interface SteelFactory {
+    id: string;
+    position: { x: number, y: number };
+    production: number;
+}
 
 export interface Fleet {
     id: string;
