@@ -8,6 +8,9 @@ export interface Colony {
     planet: Planet;
     colonyLevel: ColonyLevel;
     colonyFleet?: Fleet[];
+    is_fighting?: boolean;
+    defense_target_id?: string;
+    defense_target_pos?: { x: number, y: number, z: number };
 }
 
 export interface Planet {

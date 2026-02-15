@@ -33,7 +33,6 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
   const fleetRef = useRef<Fleet>(fleetProp) as RefObject<Fleet>;
   const groupRef = useRef<Group | null>(null);
   const orbitRadiusRef = useRef<number>(0);
-  const lastUpdateTimeRef = useRef<number>(0);
 
   // Ensure ref stays in sync if parent replaces fleetProp reference
   useEffect(() => {
@@ -55,9 +54,6 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
       // If distance is small, we mostly IGNORE the server position (except orbit radius)
       // and continue our smooth local simulation. The server update primarily serves
       // to update the velocity vector (which fleetRef picked up above).
-      // NOTE: We intentionally do NOT apply fleetProp.rotation here.
-      // Rotation is driven purely by the velocity-based computation in useFrame
-      // to avoid fighting between server data and local animation.
     }
   }, [fleetProp]);
 
@@ -95,14 +91,40 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
 
       const ARRIVE_THRESHOLD = 0.2;
       const MAX_SPEED = 1.5;
+      const ROTATION_DURATION = 0.5; 
 
       if (dist > ARRIVE_THRESHOLD) {
         const desired = toTarget.normalize().multiplyScalar(MAX_SPEED);
         f.velocity = { x: desired.x, y: desired.y, z: desired.z };
         f.state = 'Moving';
-        // Rotation is handled in the main update loop below (Block B) based on velocity
-      } else {
+        // compute desired orientation so fleet faces movement direction
+        if (groupRef.current) {
+          const originWorld = new THREE.Vector3();
+          groupRef.current.getWorldPosition(originWorld);
+          const targetWorldPos = targetWorld; // defined above
 
+          // world quaternion that looks from origin toward the target
+          const lookMat = new THREE.Matrix4().lookAt(targetWorldPos, originWorld, new THREE.Vector3(0, 1, 0));
+          const worldQuat = new THREE.Quaternion().setFromRotationMatrix(lookMat);
+
+          // convert world quaternion to group's local quaternion space
+          const parent = groupRef.current.parent as THREE.Object3D | null;
+          let localTargetQuat = worldQuat.clone();
+          if (parent) {
+            const parentWorldQuat = new THREE.Quaternion();
+            parent.getWorldQuaternion(parentWorldQuat);
+            localTargetQuat = parentWorldQuat.clone().invert().multiply(worldQuat);
+          }
+
+          // slerp current local quaternion toward the target over ROTATION_DURATION seconds
+          const t = Math.min(1, delta / ROTATION_DURATION);
+          groupRef.current.quaternion.slerp(localTargetQuat, t);
+
+          // persist rotation to fleet ref and notify parent
+          f.rotation = groupRef.current.quaternion.clone();
+          onUpdate?.({ ...f });
+        }
+      } else {
         f.velocity = { x: 0, y: 0, z: 0 };
         const clearedFleet: Fleet = { ...f, order: undefined, state: 'Idle' };
         fleetRef.current = clearedFleet as unknown as Fleet;
@@ -110,9 +132,12 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
       }
     }
 
-
+    // Smoother Movement Logic: "Pure Client Prediction"
+    // We rely entirely on the velocity vector to drive the animation.
+    // We do NOT reconcile against server position every frame, avoiding jitter.
+    // Drifts are corrected only on large discrepancies (handled in useEffect).
     if (groupRef.current) {
-      
+       // Step 1: Integrate Velocity (Prediction)
        const vx = f.velocity.x;
        const vy = f.velocity.y;
        const vz = f.velocity.z ?? 0;
@@ -121,87 +146,44 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
        groupRef.current.position.y += vy * delta;
        groupRef.current.position.z += vz * delta;
 
-       const shouldOrbit = f.state === 'Idle' || f.state === 'Patrolling';
-       
+       // Step 2: Orbit Constraint
+       // Force the ship to stay on its designated orbital shell.
+       // This prevents "cutting through" the sphere due to linear movement.
        const currentLen = groupRef.current.position.length();
-       if (shouldOrbit && orbitRadiusRef.current > 0 && currentLen > 0.001) {
+       if (orbitRadiusRef.current > 0 && currentLen > 0.001) {
            // Normalize and scale to orbit radius
            groupRef.current.position.multiplyScalar(orbitRadiusRef.current / currentLen);
        }
-
-      const rawVelocity = new THREE.Vector3(
-        f.velocity.x,
-        f.velocity.y,
-        f.velocity.z ?? 0
+       
+      // Rotate fleet to face direction of travel based on velocity
+      const velocityMagnitude = Math.sqrt(
+        f.velocity.x * f.velocity.x + 
+        f.velocity.y * f.velocity.y + 
+        (f.velocity.z ?? 0) * (f.velocity.z ?? 0)
       );
       
-      let effectiveVelocity = rawVelocity;
-      if (shouldOrbit && groupRef.current.position.lengthSq() > 0.001) {
-        const posNorm = groupRef.current.position.clone().normalize();
-        const radialComponent = posNorm.multiplyScalar(rawVelocity.dot(posNorm));
-        effectiveVelocity = rawVelocity.clone().sub(radialComponent);
-      }
-      
-      const velocityMagnitude = effectiveVelocity.length();
-      
-      let targetQuaternion: THREE.Quaternion | null = null;
-      
-      // Use a fixed world-up vector for stable, consistent rotations.
-      // A planet-relative up (position.normalize()) shifts every frame as the fleet
-      // orbits, causing the target quaternion to oscillate and preventing convergence.
-      const up = new THREE.Vector3(0, 1, 0);
-
-      // Case 1: Rotate to face direction of travel (Moving/Patrolling)
+      // Only rotate if fleet is actually moving
       if (velocityMagnitude > 0.01) {
-        const targetDirection = effectiveVelocity.clone().normalize();
+        // Calculate target rotation based on velocity direction
+        const targetDirection = new THREE.Vector3(
+          f.velocity.x,
+          f.velocity.y,
+          f.velocity.z ?? 0
+        ).normalize();
         
-        // Use lookAt to build rotation: aligns model -Z toward the target direction.
-        // This matches the model's geometry where -Z = nose (proven by backup).
-        const origin = new THREE.Vector3(0, 0, 0);
-        const lookAtTarget = origin.clone().add(targetDirection);
-        const lookMatrix = new THREE.Matrix4().lookAt(lookAtTarget, origin, up);
-        targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookMatrix);
-      }
-      // Case 2: Rotate to face Target (Attacking, stationary)
-      else if (f.isAttacking && f.target?.position && groupRef.current) {
-        const targetWorld = new THREE.Vector3(
-            f.target.position.x, 
-            f.target.position.y, 
-            f.target.position.z ?? 0
-        );
+        // Create a quaternion that looks in the direction of movement
+        // Using lookAt with up vector pointing up (0, 1, 0)
+        const currentPos = new THREE.Vector3(0, 0, 0);
+        const lookAtTarget = currentPos.clone().add(targetDirection);
+        const upVector = new THREE.Vector3(0, 1, 0);
         
-        const parent = groupRef.current.parent;
-        if (parent) {
-            const targetLocal = parent.worldToLocal(targetWorld.clone());
-            const currentPos = groupRef.current.position;
-            
-            const lookMatrix = new THREE.Matrix4().lookAt(targetLocal, currentPos, up);
-            targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookMatrix);
-        }
-      }
-      
-      if (targetQuaternion) {
+        const lookMatrix = new THREE.Matrix4().lookAt(lookAtTarget, currentPos, upVector);
+        const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookMatrix);
+        
         // Smoothly interpolate rotation (slerp) for smooth turning
-        const rotationSpeed = 2.0;
+        const rotationSpeed = 0.5; // Optimized for smooth majestic turns
         const t = Math.min(1, delta * rotationSpeed);
         groupRef.current.quaternion.slerp(targetQuaternion, t);
-        
-        // Persist rotation to fleet state as a proper THREE.Quaternion (not a plain object)
-        f.rotation = groupRef.current.quaternion.clone();
-      }
-      
-      // Persist position changes to fleet state
-      f.position = {
-        x: groupRef.current.position.x,
-        y: groupRef.current.position.y,
-        z: groupRef.current.position.z
-      };
-      
-      // Throttle parent updates to 10 p. sec to avoid feedback loops
-      const now = performance.now();
-      if (onUpdate && (now - lastUpdateTimeRef.current > 100)) {
-        lastUpdateTimeRef.current = now;
-        onUpdate({ ...f });
       }
     }
 
@@ -211,6 +193,10 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
   const count = fleetProp.count ?? 1;
   const spacing = 0.6;
 
+  // Arrow/V formation offsets for 3 ships:
+  // Ship 0 (leader): front center
+  // Ship 1: left-back
+  // Ship 2: right-back
   const getFormationOffset = (index: number, totalCount: number): [number, number, number] => {
     if (totalCount === 1) return [0, 0, 0];
     
@@ -248,5 +234,3 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
     </group>
   );
 }
-
-useGLTF.preload('/models/earth/Jupiter-transformed.glb');

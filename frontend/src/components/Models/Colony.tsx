@@ -9,6 +9,7 @@ import { ColonySettlement } from './structures/ColonySettlement';
 import { BaseFlag } from './structures/BaseFlag';
 import { OilPump } from './structures/OilPump';
 import { SteelFactory } from './structures/SteelFactory';
+import { BaseDefenseSystem } from './structures/BaseDefenseSystem';
 
 // Map colony levels to their corresponding base structure components
 const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyColor?: string }>> = {
@@ -476,6 +477,12 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
             quaternion={[q.x, q.y, q.z, q.w]}
           >
             <Component colonyColor={colonyColor} />
+            {index === 0 && (
+                <BaseDefenseSystem 
+                    isAttacking={colony.is_fighting} 
+                    targetPos={colony.defense_target_pos} 
+                />
+            )}
           </group>
         );
       })}

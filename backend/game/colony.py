@@ -2,8 +2,8 @@ import uuid
 import random
 import math
 import numpy as np
-from typing import Optional, List, Dict, Any
-from models import ColonyModel, Fleet, ColonyLevel, ColonyTrait, OilPump, SteelFactory, Vector2, Vector3
+from typing import Optional, List, Dict, Any, cast, Union
+from models import ColonyModel, Fleet, ColonyLevel, ColonyTrait, OilPump, SteelFactory, Vector2, Vector3, FleetTarget
 import time
 from pathlib import Path
 import json
@@ -69,6 +69,8 @@ class Colony:
 
 	def __init__(self, colony: ColonyModel):
 		self.colony = colony
+		if self.colony.owner_id is None:
+			self.colony.owner_id = self.colony.id
 		self.last_residents_update = time.time()
 		self._previous_state = self.colony.dict()
 		self._has_changes = False
@@ -86,6 +88,10 @@ class Colony:
 	def _distance_v2(self, p1: Vector2, p2: Vector2) -> float:
 		"""Calculate euclidean distance between two Vector2 points."""
 		return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+
+	def _distance_v3(self, p1: Vector3, p2: Vector3) -> float:
+		"""Calculate euclidean distance between two Vector3 points."""
+		return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2)
 
 	def _is_position_valid(self, position: Vector2, min_dist: float) -> bool:
 		"""Check if a position is valid (not too close to other structures)."""
@@ -138,17 +144,22 @@ class Colony:
 		self.colony.residents = max(0, self.colony.residents + delta)
 		self._mark_changed()
 
-	def update(self, delta_time: Optional[float] = None) -> None:
+	def update(self, delta_time: Optional[float] = None, all_colonies: Optional[List['Colony']] = None) -> None:
 		"""Update colony state, including fleets.
 		
 		Args:
 			delta_time: Time since last tick in seconds (for fleet movement).
+			all_colonies: List of all colonies in the game (for combat/interactions).
 		"""
 		if delta_time is None:
 			delta_time = 0.5  # Default tick rate
 		
-		# Update fleets every tick (movement needs frequent updates)
-		self.update_fleets(delta_time)
+		# Handle combat behavior first
+		if all_colonies:
+			self.update_combat(delta_time, all_colonies)
+
+		# Update fleets every tick (movement and behavior)
+		self.update_fleets(delta_time, all_colonies)
 		
 		# Check if enough time has passed for resource/resident updates
 		time_since_last_update = time.time() - self.last_residents_update
@@ -647,16 +658,16 @@ class Colony:
 				else:
 					try_build_economy()
 
-	def update_fleets(self, delta_time: float):
+	def update_fleets(self, delta_time: float, all_colonies: Optional[List['Colony']] = None):
 		"""Update all fleet positions and behaviors."""
 		if not self.colony.colonyFleet:
 			return
 		
 		for fleet in self.colony.colonyFleet:
-			self._update_fleet_movement(fleet, delta_time)
-			self._update_fleet_behavior(fleet)
+			self._update_fleet_movement(fleet, delta_time, all_colonies)
+			self._update_fleet_behavior(fleet, all_colonies)
 
-	def _project_position_to_orbit(self, position: Vector3) -> Vector3:
+	def _project_position_to_orbit(self, position: Vector3, min_radius_only: bool = False) -> Vector3:
 		"""Project a position onto the safe orbit shell around the planet."""
 		planet_pos = self.colony.planet.position
 		
@@ -668,11 +679,17 @@ class Colony:
 		dist = math.sqrt(dx*dx + dy*dy + dz*dz)
 		if dist < 0.001:
 			dx, dy, dz = 0, 1, 0
-			dist = 1.0
+			dist = 0.001 # Fix div by zero risk properly
 			
 		# Safe Orbit Radius:
 		# Planet Scale * Base Radius (from config) * Safety(1.1) + Fly Altitude (3.0)
 		orbit_radius = self.colony.planet.scale * planet_model_radius * 1.1 + 3.0
+		
+		# If we only want to ensure minimum radius (for leaving orbit)
+		if min_radius_only:
+			if dist >= orbit_radius:
+				return position
+			# Otherwise push out to radius
 		
 		scale_factor = orbit_radius / dist
 		
@@ -682,7 +699,7 @@ class Colony:
 			z=planet_pos.z + dz * scale_factor
 		)
 
-	def _update_fleet_movement(self, fleet: Fleet, delta_time: float):
+	def _update_fleet_movement(self, fleet: Fleet, delta_time: float, all_colonies: Optional[List['Colony']] = None):
 		"""Update fleet velocity vector towards current waypoint.
 		
 		All positions and waypoints are in WORLD SPACE.
@@ -696,9 +713,39 @@ class Colony:
 			next_y = fleet.position.y + fleet.velocity.y * delta_time
 			next_z = fleet.position.z + fleet.velocity.z * delta_time
 			
-			# Enforce Orbit Shell Constraint check
-			# This prevents the fleet from ever entering the planet
-			constrained_pos = self._project_position_to_orbit(Vector3(x=next_x, y=next_y, z=next_z))
+			# Orbit Constraint Strategy:
+			# 1. Patrol/Idle: Strict constraint (stick to shell)
+			# 2. Attack (Moving remote): Min-radius constraint (don't clip planet)
+			use_min_radius = False
+			if fleet.state == "Moving" and fleet.target and fleet.target.id:
+				use_min_radius = True
+			
+			# Global Planet Collision Avoidance (Clip Check)
+			# If we are moving interstellar, check if we are clipping ANY planet
+			# If so, push us out.
+			if use_min_radius and all_colonies:
+				for c in all_colonies:
+					p_pos = c.colony.planet.position
+					p_scale = c.colony.planet.scale
+					p_rad = p_scale * planet_model_radius * 1.1 + 3.0 # Safe radius
+					
+					p_dx = next_x - p_pos.x
+					p_dy = next_y - p_pos.y
+					p_dz = next_z - p_pos.z
+					p_dist = math.sqrt(p_dx*p_dx + p_dy*p_dy + p_dz*p_dz)
+					
+					if p_dist < p_rad:
+						# Collision! Push out.
+						if p_dist < 0.001: p_dist = 0.001
+						scale = p_rad / p_dist
+						next_x = p_pos.x + p_dx * scale
+						next_y = p_pos.y + p_dy * scale
+						next_z = p_pos.z + p_dz * scale
+
+			constrained_pos = self._project_position_to_orbit(
+				Vector3(x=next_x, y=next_y, z=next_z),
+				min_radius_only=use_min_radius
+			)
 			
 			fleet.position.x = constrained_pos.x
 			fleet.position.y = constrained_pos.y
@@ -724,11 +771,34 @@ class Colony:
 		arrival_threshold = 1.0
 		
 		if distance <= arrival_threshold:
-			# Reached waypoint, rotate to next
-			first_waypoint = fleet.waypoints.pop(0)
-			fleet.waypoints.append(first_waypoint)
+			# Reached waypoint
 			self._mark_changed()
 			
+			# Remove the current waypoint
+			if fleet.waypoints:
+				reached_wp = fleet.waypoints.pop(0)
+				
+				# For Patrolling, cycle it back to the end
+				if fleet.state == "Patrolling":
+					fleet.waypoints.append(reached_wp)
+
+			# Behavior depends on state
+			if fleet.state == "Moving" and fleet.target and fleet.target.id:
+				# Only switch to Attacking if we have reached the FINAL waypoint
+				if not fleet.waypoints:
+					fleet.velocity = Vector3(x=0.0, y=0.0, z=0.0)
+					fleet.state = "Attacking"
+					fleet.isAttacking = True
+					fleet.combatWarmup = 2.0  # Set warmup delay
+					return
+
+			# If waypoints empty now, stop
+			if not fleet.waypoints:
+				fleet.velocity = Vector3(x=0.0, y=0.0, z=0.0)
+				if fleet.state == "Moving":
+					fleet.state = "Idle"
+				return
+
 			# Update target to new first waypoint for velocity calculation
 			target_waypoint = fleet.waypoints[0]
 			dx = target_waypoint.x - fleet.position.x
@@ -740,13 +810,22 @@ class Colony:
 		if distance > 0:
 			speed = fleet.speed if fleet.speed else 5.0
 			
-			# If very close, cap speed to avoid massive overshoot in one frame
-			# (though the arrival check above handles rotation)
-			
+			# Global Collision Avoidance (Steering)
+			# Calculate direction that avoids planets on the path
+			if all_colonies:
+				steer_dir = self._get_collision_free_direction(fleet.position, target_waypoint, all_colonies)
+				dir_x = steer_dir.x
+				dir_y = steer_dir.y
+				dir_z = steer_dir.z
+			else:
+				dir_x = dx / distance
+				dir_y = dy / distance
+				dir_z = dz / distance
+
 			new_velocity = Vector3(
-				x=(dx / distance) * speed,
-				y=(dy / distance) * speed,
-				z=(dz / distance) * speed
+				x=dir_x * speed,
+				y=dir_y * speed,
+				z=dir_z * speed
 			)
 			
 			# Only update velocity if it changed significantly (reduces broadcasts)
@@ -756,8 +835,18 @@ class Colony:
 				fleet.velocity = new_velocity
 				self._mark_changed()
 
-	def _update_fleet_behavior(self, fleet: Fleet):
+	def _update_fleet_behavior(self, fleet: Fleet, all_colonies: Optional[List['Colony']] = None):
 		"""Update fleet behavior based on state and trait."""
+		# If Attacking, we are managed by update_combat
+		if fleet.state == "Attacking":
+			return
+
+		# Aggressive/Defensive logic: Search for targets if Idle/Patrolling
+		if self.colony.trait != ColonyTrait.Pacifist.value and all_colonies:
+			# Cooldown for target searching to save CPU?
+			# Using patrol cooldown somewhat limits frequency of re-evaluating behavior
+			pass
+
 		# Only generate new waypoints for idle/patrolling fleets with no waypoints
 		if fleet.state not in ["Idle", "Patrolling"]:
 			return
@@ -775,6 +864,26 @@ class Colony:
 		# Update the cooldown timer
 		self._fleet_patrol_cooldowns[fleet.id] = current_time
 		
+		# Try to find a target for aggression before resuming patrol
+		if self.colony.trait in [ColonyTrait.Aggressive.value, ColonyTrait.Defensive.value] and all_colonies:
+			# Aggressive attacks more often, Defensive checks range?
+			chance = 0.5 if self.colony.trait == ColonyTrait.Aggressive.value else 0.2
+			if random.random() < chance:
+				target_info = self._find_target(fleet, all_colonies)
+				if target_info:
+					target_id, target_pos, target_type = target_info
+					self._order_attack_move(fleet, target_id, target_pos, all_colonies)
+					return
+		
+		# Awareness Logic: Check for nearby enemies even if not actively hunting (for Patrol/Idle)
+		if all_colonies: # Any fleet can perceive nearby threats
+			nearby_enemy = self._scan_for_enemies(fleet, all_colonies)
+			if nearby_enemy:
+				# Engage immediately
+				target_id, target_pos, _ = nearby_enemy
+				self._order_attack_move(fleet, target_id, target_pos, all_colonies)
+				return
+
 		# Pacifist colonies don't move fleets aggressively
 		if self.colony.trait == ColonyTrait.Pacifist.value:
 			# Just stay near home with minimal patrol
@@ -1138,3 +1247,516 @@ class Colony:
 
 		colony_model = ColonyModel(**_payload)
 		return cls(colony_model)
+
+	def _get_collision_free_direction(self, start: Vector3, end: Vector3, all_colonies: List['Colony']) -> Vector3:
+		"""Calculate a direction towards end that avoids planet collisions (Go Around behavior)."""
+		dir_vec_x = end.x - start.x
+		dir_vec_y = end.y - start.y
+		dir_vec_z = end.z - start.z
+		total_dist = math.sqrt(dir_vec_x**2 + dir_vec_y**2 + dir_vec_z**2)
+		
+		if total_dist < 0.001: 
+			return Vector3(x=0.0, y=0.0, z=0.0)
+		
+		# Normalized original direction
+		ndx, ndy, ndz = dir_vec_x / total_dist, dir_vec_y / total_dist, dir_vec_z / total_dist
+		
+		intersecting_planet = None
+		closest_impact_dist = total_dist
+		
+		# Check all planets for obstruction
+		for c in all_colonies:
+			p_pos = c.colony.planet.position
+			# Use the same radius formula as the hard-clip check + a buffer for smooth avoidance
+			# Hard clip is: scale * rad * 1.1 + 3.0
+			base_safe_radius = c.colony.planet.scale * planet_model_radius * 1.1 + 3.0
+			p_radius = base_safe_radius * 1.2 # Give it 20% more clearance for steering
+			
+			# Vector to planet center
+			ox = p_pos.x - start.x
+			oy = p_pos.y - start.y
+			oz = p_pos.z - start.z
+			
+			# Project planet center onto line of flight
+			# t = Dot(SphereCenter - Start, Dir)
+			t = ox * ndx + oy * ndy + oz * ndz
+			
+			# Planet is behind us (and we are outside) or too far ahead
+			# Note: If we are INSIDE the radius (t < 0 but close), we might need to escape. 
+			# But "push out" logic handles escape. This handles "Navigation".
+			if t < 0 or t > total_dist:
+				continue
+				
+			# Closest point on line to sphere center
+			cpx = start.x + ndx * t
+			cpy = start.y + ndy * t
+			cpz = start.z + ndz * t
+			
+			# Distance from closest point to sphere center
+			dist_sq = (cpx - p_pos.x)**2 + (cpy - p_pos.y)**2 + (cpz - p_pos.z)**2
+			
+			if dist_sq < p_radius * p_radius:
+				# Collision detected
+				if t < closest_impact_dist:
+					closest_impact_dist = t
+					intersecting_planet = (c, t, dist_sq)
+
+		if not intersecting_planet:
+			return Vector3(x=ndx, y=ndy, z=ndz)
+
+		# Handle Intersection -> Calculate Detour
+		c, t, dist_sq = intersecting_planet
+		p_pos = c.colony.planet.position
+		
+		# Re-calculate specific radius for the intersected planet
+		base_safe_radius = c.colony.planet.scale * planet_model_radius * 1.1 + 3.0
+		p_radius = base_safe_radius * 1.2
+		
+		# We want a detour point at the "Horizon" of the safety sphere.
+		# Construct closest point on the ray
+		cpx = start.x + ndx * t
+		cpy = start.y + ndy * t
+		cpz = start.z + ndz * t
+		
+		# Vector from Planet to that Closest Point (Radial vector)
+		rad_x = cpx - p_pos.x
+		rad_y = cpy - p_pos.y
+		rad_z = cpz - p_pos.z
+		rad_len = math.sqrt(rad_x**2 + rad_y**2 + rad_z**2)
+		
+		if rad_len < 0.001:
+			# Direct hit through center. Pick arbitrary up.
+			rad_x, rad_y, rad_z = 0.0, 1.0, 0.0
+			rad_len = 1.0
+		
+		# Detour point: Move the closest collision point OUTWARD to the safety radius
+		# This effectively aims the ship at the "edge" of the planet interference zone
+		buffer = 1.2
+		detour_x = p_pos.x + (rad_x / rad_len) * (p_radius * buffer)
+		detour_y = p_pos.y + (rad_y / rad_len) * (p_radius * buffer)
+		detour_z = p_pos.z + (rad_z / rad_len) * (p_radius * buffer)
+		
+		# New direction: Start -> Detour
+		new_dir_x = detour_x - start.x
+		new_dir_y = detour_y - start.y
+		new_dir_z = detour_z - start.z
+		new_len = math.sqrt(new_dir_x**2 + new_dir_y**2 + new_dir_z**2)
+		
+		if new_len > 0.001:
+			return Vector3(x=new_dir_x/new_len, y=new_dir_y/new_len, z=new_dir_z/new_len)
+		
+		return Vector3(x=ndx, y=ndy, z=ndz)
+
+	def _find_target(self, fleet: Fleet, all_colonies: List['Colony']):
+		"""Find a suitable target (Enemy Colony Base or Fleet)."""
+		potential_targets = []
+		my_owner = self.colony.owner_id
+		
+		for other in all_colonies:
+			if other.colony.id == self.colony.id: 
+				continue
+			other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+			if other_owner == my_owner:
+				continue
+
+			# Target 1: The Main Base
+			base_pos = other._get_planet_base_position()
+			dist = self._distance_v3(fleet.position, base_pos)
+			potential_targets.append((dist, other.colony.id, base_pos, "Base"))
+
+			# Target 2: Fleets
+			if other.colony.colonyFleet:
+				for f in other.colony.colonyFleet:
+					dist_f = self._distance_v3(fleet.position, f.position)
+					potential_targets.append((dist_f, f.id, f.position, "Fleet"))
+
+		if not potential_targets:
+			return None
+		
+		potential_targets.sort(key=lambda x: x[0])
+		_, target_id, target_pos, target_type = potential_targets[0]
+		return target_id, target_pos, target_type
+
+	def _scan_for_enemies(self, fleet: Fleet, all_colonies: List['Colony']):
+		"""Quick scan for nearby enemies to react to."""
+		scan_radius = 40.0 # Detection range
+		my_owner = self.colony.owner_id
+		
+		closest_dist = scan_radius
+		closest = None
+		
+		# Check fleets only (bases are usually too far to just stumble upon unless attacking)
+		for other in all_colonies:
+			other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+			if other_owner == my_owner: continue
+			
+			if other.colony.colonyFleet:
+				for f in other.colony.colonyFleet:
+					dist = self._distance_v3(fleet.position, f.position)
+					if dist < closest_dist:
+						closest_dist = dist
+						closest = (f.id, f.position, "Fleet")
+		
+		return closest
+
+	def _get_detour_point(self, start: Vector3, end: Vector3, center: Vector3, radius: float) -> Optional[Vector3]:
+		"""Calculate a detour point if the segment intersects the sphere."""
+		# Vector from Start to End
+		ab_x = end.x - start.x
+		ab_y = end.y - start.y
+		ab_z = end.z - start.z
+		ab_len_sq = ab_x*ab_x + ab_y*ab_y + ab_z*ab_z
+		
+		if ab_len_sq == 0:
+			return None
+			
+		# Vector from Start to Center
+		ac_x = center.x - start.x
+		ac_y = center.y - start.y
+		ac_z = center.z - start.z
+		
+		# Project C onto AB to find closest point P parameter t
+		t = (ac_x*ab_x + ac_y*ab_y + ac_z*ab_z) / ab_len_sq
+		
+		# Clamp t to segment [0, 1]
+		closest_t = max(0.0, min(1.0, t))
+		
+		# P = Start + t * AB
+		px = start.x + closest_t * ab_x
+		py = start.y + closest_t * ab_y
+		pz = start.z + closest_t * ab_z
+		
+		# Vector from Center to P
+		cp_x = px - center.x
+		cp_y = py - center.y
+		cp_z = pz - center.z
+		dist_sq = cp_x*cp_x + cp_y*cp_y + cp_z*cp_z
+		
+		if dist_sq >= radius*radius:
+			return None # No intersection
+			
+		# Intersection!
+		# Calculate detour direction: Normalize CP (outward from center)
+		dist = math.sqrt(dist_sq)
+		if dist < 0.001:
+			# Passes through center? Pick arbitrary "Up" or orthogonal
+			if abs(ab_z) > abs(ab_x) and abs(ab_z) > abs(ab_y):
+				nx, ny, nz = 0, 1, 0
+			else:
+				nx, ny, nz = 0, 0, 1
+		else:
+			nx, ny, nz = cp_x/dist, cp_y/dist, cp_z/dist
+			
+		# Detour point = Center + Normal * (Radius + Margin)
+		margin = 8.0 
+		safe_dist = radius + margin
+		
+		return Vector3(
+			x = center.x + nx * safe_dist,
+			y = center.y + ny * safe_dist,
+			z = center.z + nz * safe_dist
+		)
+
+	def _generate_path_waypoints(self, start: Vector3, end: Vector3, all_colonies: List['Colony'], depth: int = 0) -> List[Vector3]:
+		"""Recursively generate waypoints to avoid planets."""
+		if depth > 2: # Limit recursion
+			return [end]
+		
+		if not all_colonies:
+			return [end]
+			
+		best_detour = None
+		closest_sq_dist = float('inf')
+		
+		for col in all_colonies:
+			# Planet stats
+			p_pos = col.colony.planet.position
+			p_scale = col.colony.planet.scale
+			p_radius = p_scale * planet_model_radius * 1.1 + 3.0
+			
+			detour = self._get_detour_point(start, end, p_pos, p_radius)
+			if detour:
+				# Prioritize the obstacle closest to the start
+				d_sq = (p_pos.x-start.x)**2 + (p_pos.y-start.y)**2 + (p_pos.z-start.z)**2
+				
+				if d_sq < closest_sq_dist:
+					closest_sq_dist = d_sq
+					best_detour = detour
+		
+		if not best_detour:
+			return [end]
+			
+		# Determine path segments avoiding the best_detour
+		path1 = self._generate_path_waypoints(start, best_detour, all_colonies, depth + 1)
+		path2 = self._generate_path_waypoints(best_detour, end, all_colonies, depth + 1)
+		
+		return path1 + path2
+
+	def _order_attack_move(self, fleet: Fleet, target_id: str, target_pos: Vector3, all_colonies: List['Colony'], target_type: str = "Base"):
+		"""Order fleet to move to a firing position near target."""
+		
+		final_pos = None
+		
+		# Strategy 1: For Base targets, aim for a position "Above" the base relative to planet center
+		# This guarantees Line of Sight and prevents trying to path through the planet
+		if target_type == "Base":
+			# Find the owner colony to get planet center
+			target_colony = next((c for c in all_colonies if c.colony.id == target_id), None)
+			if target_colony:
+				planet_pos = target_colony.colony.planet.position
+				
+				# Vector from Planet Center to Base (The "Up" vector)
+				nx = target_pos.x - planet_pos.x
+				ny = target_pos.y - planet_pos.y
+				nz = target_pos.z - planet_pos.z
+				n_len = math.sqrt(nx*nx + ny*ny + nz*nz)
+				
+				if n_len > 0.001:
+					# Normalize
+					nx, ny, nz = nx/n_len, ny/n_len, nz/n_len
+					
+					# Attack position = Base + Normal * Range
+					attack_range = 15.0
+					final_pos = Vector3(
+						x = target_pos.x + nx * attack_range,
+						y = target_pos.y + ny * attack_range,
+						z = target_pos.z + nz * attack_range
+					)
+
+		# Strategy 2: Default / Fallback (For fleets or if base lookup failed)
+		# Aim for a point along the line between Fleet and Target
+		if not final_pos:
+			dx = fleet.position.x - target_pos.x
+			dy = fleet.position.y - target_pos.y
+			dz = fleet.position.z - target_pos.z
+			dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+			
+			attack_range = 15.0
+			
+			if dist == 0:
+				direction = Vector3(x=1, y=0, z=0)
+			else:
+				direction = Vector3(x=dx/dist, y=dy/dist, z=dz/dist)
+				
+			final_x = target_pos.x + direction.x * attack_range
+			final_y = target_pos.y + direction.y * attack_range
+			final_z = target_pos.z + direction.z * attack_range
+			
+			final_pos = Vector3(x=final_x, y=final_y, z=final_z)
+		
+		# Generate a safe path of waypoints to the determined firing position
+		waypoints = self._generate_path_waypoints(fleet.position, final_pos, all_colonies)
+		
+		fleet.waypoints = waypoints
+		fleet.target = FleetTarget(id=target_id, position=target_pos)
+		fleet.state = "Moving"
+		self._mark_changed()
+
+	def update_combat(self, delta_time: float, all_colonies: List['Colony']):
+		"""Handle combat logic for fleets and base."""
+		# 1. Fleets
+		if self.colony.colonyFleet:
+			for fleet in self.colony.colonyFleet:
+				if fleet.isAttacking and fleet.target and fleet.target.id:
+					self._resolve_fleet_combat(fleet, delta_time, all_colonies)
+
+		# 2. Base Defense (if upgraded)
+		self.colony.is_fighting = False
+		self.colony.defense_target_id = None
+		self.colony.defense_target_pos = None
+		
+		try:
+			current_index = COLONY_LEVEL_ORDER.index(self.colony.colonyLevel)
+			if current_index >= 1: # Settlement or higher
+				self._resolve_base_defense(delta_time, all_colonies)
+		except ValueError:
+			pass
+
+	def _resolve_fleet_combat(self, fleet: Fleet, delta_time: float, all_colonies: List['Colony']):
+		"""Process combat for a single fleet."""
+		if not fleet.target or not fleet.target.id:
+			return
+
+		target_id = fleet.target.id
+		target_colony = None
+		target_obj: Union[ColonyModel, Fleet, None] = None
+		target_type = "Unknown"
+		target_pos: Optional[Vector3] = None
+		
+		for c in all_colonies:
+			if c.colony.id == target_id:
+				target_colony = c
+				target_obj = c.colony
+				target_type = "Base"
+				target_pos = c._get_planet_base_position()
+				break
+			if c.colony.colonyFleet:
+				for f in c.colony.colonyFleet:
+					if f.id == target_id:
+						target_colony = c
+						target_obj = f
+						target_type = "Fleet"
+						target_pos = f.position
+						break
+			if target_obj: break
+		
+		if not target_obj or not target_colony or not target_pos:
+			fleet.isAttacking = False
+			fleet.target = None
+			fleet.state = "Idle"
+			self._mark_changed()
+			return
+
+		fleet.target.position = target_pos
+
+		dist = self._distance_v3(fleet.position, target_pos)
+		if dist > 30.0:
+			fleet.isAttacking = False
+			fleet.state = "Idle"
+			self._mark_changed()
+			return
+		
+		if not self._has_line_of_sight(fleet.position, target_pos, all_colonies):
+			return
+
+		# New Combat Logic: Synchronized States & Warmup
+		if target_type == "Fleet":
+			fleet_obj = cast(Fleet, target_obj)
+			
+			# If target is not yet engaging, force it to engage
+			# But if it's already Attacking someone else (target.isAttacking == True), we don't interrupt?
+			# User said: "Once a fleet is bound to attack another fleet, both will go into an 'attacking state'."
+			# "Keep in mind that two fleets can attack one fleet" - so 2 vs 1. 
+			# The single fleet can only be in one state. If it's already fighting someone, it stays fighting.
+			
+			# Force target to stay put and fight if potential victim
+			if fleet_obj.state != "Attacking":
+				fleet_obj.state = "Attacking"
+				fleet_obj.isAttacking = True
+				fleet_obj.velocity = Vector3(x=0.0, y=0.0, z=0.0)
+				fleet_obj.waypoints = [] # Stop moving
+				fleet_obj.combatWarmup = 2.0 # Force warmup on defender too
+				# Should we set defender's target to us?
+				# If defender has no target, yes.
+				if not fleet_obj.target or not fleet_obj.target.id:
+					fleet_obj.target = FleetTarget(id=fleet.id, position=fleet.position)
+				
+				target_colony._mark_changed()
+
+		# Handle Warmup
+		if fleet.combatWarmup > 0:
+			fleet.combatWarmup -= delta_time
+			# self._mark_changed() # Spammy if we update every tick just for timer?
+			# Maybe only sync it occasionally or let client infer?
+			# Code currently syncs all changes.
+			return
+
+		dps = fleet.damage if fleet.damage is not None else 10.0
+		damage = dps * delta_time
+		
+		if target_type == "Fleet":
+			fleet_obj = cast(Fleet, target_obj)
+			current_hp = float(fleet_obj.hpPool) if fleet_obj.hpPool is not None else 100.0
+			fleet_obj.hpPool = current_hp - damage
+			if fleet_obj.hpPool <= 0:
+				target_colony.remove_fleet(fleet_obj.id)
+				target_colony._add_action_event("Fleet destroyed!", "combat")
+				fleet.isAttacking = False
+				fleet.target = None
+				fleet.state = "Idle"
+				self._mark_changed()
+		elif target_type == "Base":
+			base_obj = cast(ColonyModel, target_obj)
+			current_hp = float(base_obj.hp) if base_obj.hp is not None else base_obj.max_hp
+			base_obj.hp = current_hp - damage
+			
+			if base_obj.hp <= 0:
+				self._take_over_colony(target_colony)
+				fleet.isAttacking = False
+				fleet.target = None
+				fleet.state = "Idle"
+				self._mark_changed()
+
+	def _take_over_colony(self, victim: 'Colony'):
+		"""Handle taking over a defeated colony."""
+		victim.colony.owner_id = self.colony.owner_id
+		victim.colony.hp = victim.colony.max_hp
+		victim.colony.color = self.colony.color
+		victim.colony.colonyFleet = []
+		
+		victim._mark_changed()
+		victim._add_action_event(f"Conquered by {self.colony.name}!", "defeat")
+		self._add_action_event(f"Conquered {victim.colony.name}!", "victory")
+
+	def _resolve_base_defense(self, delta_time: float, all_colonies: List['Colony']):
+		"""Base defense logic: Shoot closest enemy."""
+		my_base_pos = self._get_planet_base_position()
+		range_limit = 30.0
+		
+		closest_enemy = None
+		closest_colony = None
+		min_dist = range_limit
+		
+		for other in all_colonies:
+			owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+			if owner == self.colony.owner_id: continue
+			
+			if other.colony.colonyFleet:
+				for f in other.colony.colonyFleet:
+					# Rule: Only fire at fleets that are actively attacking THIS colony (Base)
+					# This prevents premature shooting while the fleet is moving to position
+					if not (f.isAttacking and f.target and f.target.id == self.colony.id):
+						continue
+
+					d = self._distance_v3(my_base_pos, f.position)
+					if d < min_dist:
+						if self._has_line_of_sight(my_base_pos, f.position, all_colonies):
+							min_dist = d
+							closest_enemy = f
+							closest_colony = other
+		
+		if closest_enemy and closest_colony:
+			# Mark as fighting for frontend animation
+			self.colony.is_fighting = True
+			self.colony.defense_target_id = closest_enemy.id
+			self.colony.defense_target_pos = closest_enemy.position
+			self._mark_changed()
+
+			current_hp = float(closest_enemy.hpPool) if closest_enemy.hpPool is not None else 100.0
+			# Reduced damage from 20.0 to 12.0
+			closest_enemy.hpPool = current_hp - (12.0 * delta_time)
+			if closest_enemy.hpPool <= 0:
+				closest_colony.remove_fleet(closest_enemy.id)
+				self.colony.is_fighting = False
+				self.colony.defense_target_id = None
+				self.colony.defense_target_pos = None
+				self._mark_changed()
+
+	def _has_line_of_sight(self, p1: Vector3, p2: Vector3, all_colonies: List['Colony']) -> bool:
+		dx = p2.x - p1.x
+		dy = p2.y - p1.y
+		dz = p2.z - p1.z
+		dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+		if dist < 0.001: return True
+		
+		dir_x = dx/dist
+		dir_y = dy/dist
+		dir_z = dz/dist
+		
+		for c in all_colonies:
+			center = c.colony.planet.position
+			radius = c.colony.planet.scale * planet_model_radius
+			lx = center.x - p1.x
+			ly = center.y - p1.y
+			lz = center.z - p1.z
+			tca = lx*dir_x + ly*dir_y + lz*dir_z
+			if tca < 0: continue
+			d2 = (lx*lx + ly*ly + lz*lz) - tca*tca
+			radius2 = radius * radius
+			if d2 > radius2: continue
+			thc = math.sqrt(radius2 - d2)
+			t0 = tca - thc
+			t1 = tca + thc
+			if (t0 > 0.1 and t0 < dist) or (t1 > 0.1 and t1 < dist):
+				return False
+		return True

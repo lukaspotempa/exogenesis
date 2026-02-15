@@ -102,6 +102,8 @@ class Fleet(BaseModel):
     isAttacking: Optional[bool] = False
     waypoints: Optional[List[Vector3]] = None
     homePosition: Optional[Vector3] = None
+    lastAttackTime: float = 0.0
+    combatWarmup: float = 0.0
 
 
 class ColonyModel(BaseModel):
@@ -113,6 +115,12 @@ class ColonyModel(BaseModel):
     colonyLevel: ColonyLevel
     trait: Optional[str] = None
     colonyFleet: Optional[List[Fleet]] = None
+    hp: float = 1000.0
+    max_hp: float = 1000.0
+    owner_id: Optional[str] = None
+    is_fighting: bool = False
+    defense_target_id: Optional[str] = None
+    defense_target_pos: Optional[Vector3] = None
 
 
 

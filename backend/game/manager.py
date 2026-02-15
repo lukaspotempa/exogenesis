@@ -28,6 +28,11 @@ class GameManager:
         with open('config.json') as f:
             default_data = json.load(f)
         
+        # Check for debug scenario
+        if default_data.get("use_debug_scenario", False):
+            print("Initializing Debug Scenario: 2 planets 150 units apart.")
+            return self._create_debug_scenario()
+            
         for i in range(count):
             payload = {
                 "name": colony_names[len(self.colonies)],
@@ -36,6 +41,55 @@ class GameManager:
                 "colonyLevel": "Colony",
             }
             created.append(self.create_colony(payload))
+        return created
+
+    def _create_debug_scenario(self) -> List[dict]:
+        """Create a deterministic scenario for testing."""
+        self.colonies.clear()
+        created = []
+        
+        # Colony 1: Attacker (Red) at (-75, 0, 0)
+        c1_payload = {
+            "name": "Red Attacker",
+            "residents": 1000,
+            "color": "#FF0000",
+            "colonyLevel": "Metropolis", # High level
+            "trait": "Aggressive",
+            "planet": {
+                "position": {"x": -75.0, "y": 0.0, "z": 0.0},
+                "scale": 1.0,
+                "rot": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "planetModelName": "Planet_A",
+                "planetMainBase": {"x": 0.0, "y": 0.0}, # Centered base
+                "planetNaturalResources": {
+                    "oil": 2.0, "steel": 2.0, "water": 2.0, "temperature": 15.0,
+                    "oilStorage": 9000.0, "steelStorage": 9000.0, "waterStorage": 9000.0 # Plenty of resources
+                }
+            }
+        }
+        
+        # Colony 2: Defender (Blue) at (75, 0, 0)
+        c2_payload = {
+            "name": "Blue Defender",
+            "residents": 1000,
+            "color": "#0000FF",
+            "colonyLevel": "Metropolis",
+            "trait": "Defensive",
+            "planet": {
+                "position": {"x": 75.0, "y": 0.0, "z": 0.0},
+                "scale": 1.0,
+                "rot": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "planetModelName": "Planet_B",
+                "planetMainBase": {"x": 0.0, "y": 0.0},
+                "planetNaturalResources": {
+                    "oil": 2.0, "steel": 2.0, "water": 2.0, "temperature": 15.0,
+                    "oilStorage": 9000.0, "steelStorage": 9000.0, "waterStorage": 9000.0
+                }
+            }
+        }
+        
+        created.append(self.create_colony(c1_payload))
+        created.append(self.create_colony(c2_payload))
         return created
     
     def clear_colonies(self):
@@ -75,9 +129,13 @@ class GameManager:
     def tick(self, delta_time: float = 0.5) -> None:
         changes = []
         all_action_events = []
+        
+        # Pass all colonies to update so they can interact (combat)
+        all_colonies_ref = self.colonies
+        
         for c in self.colonies:
             try:
-                c.update(delta_time)
+                c.update(delta_time, all_colonies_ref)
                 # Check for changes after update
                 colony_changes = c.get_changes()
                 if colony_changes:
@@ -90,6 +148,9 @@ class GameManager:
                 print(f"Error updating colony: {e}")
                 continue
         
+        # Check Win Condition
+        self._check_win_condition(all_action_events)
+
         # Update global history
         if all_action_events:
             self.action_history.extend(all_action_events)
@@ -104,6 +165,51 @@ class GameManager:
         # Broadcast action events to all connected clients
         if all_action_events and self._connection_manager:
             asyncio.create_task(self._broadcast_action_events(all_action_events))
+
+    def _check_win_condition(self, events_list: List[dict]):
+        """Check if one colony has taken over all others."""
+        if not self.colonies:
+            return
+
+        # Group by owner
+        owners = set()
+        active_owners = set()
+        
+        for c in self.colonies:
+            owner = c.colony.owner_id if c.colony.owner_id else c.colony.id
+            owners.add(owner)
+            # Consider a colony 'active' if it has not been taken over (owner_id == id)
+            # OR just strictly check if everyone has the same owner.
+        
+        if len(owners) == 1 and len(self.colonies) > 1:
+            winner_id = list(owners)[0]
+            winner_name = next((c.colony.name for c in self.colonies if c.colony.id == winner_id), "Unknown")
+            
+            # Check if we already broadcasted win (could use a flag in GameManager)
+            # For now, let's just emit an event if not just emitted.
+            # Ideally we stop the game or pause it, or just notify.
+            # Let's add a 'GAME OVER' event.
+            
+            # Simple debounce or check state required to not spam? 
+            # Assuming the frontend handles "Game Over" gracefully or we just spam it every tick (bad).
+            # Let's check if we have a winner and haven't announced it.
+            # Since I don't have game state persistence for 'finished', I'll just check if it's a NEW win condition.
+            # But 'owners' will be 1 forever after win.
+            
+            # Maybe just send a special event type "game_over"
+            # But I'll append to events_list for now.
+            
+            # To prevent spam, I'll store 'game_over' state
+            if not getattr(self, '_game_over_announced', False):
+                 events_list.append({
+                    "id": "game-over",
+                    "timestamp": asyncio.get_event_loop().time(),
+                    "colonyId": winner_id,
+                    "colonyName": winner_name,
+                    "message": f"{winner_name} has conquered the galaxy!",
+                    "type": "victory"
+                })
+                 self._game_over_announced = True
 
     async def _broadcast_changes(self, changes: List[dict]) -> None:
         """Broadcast colony changes to all connected clients."""
