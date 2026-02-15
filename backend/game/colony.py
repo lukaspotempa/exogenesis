@@ -55,6 +55,14 @@ flanker_spawn_height = _CONFIG.get("flanker_spawn_height", 5)
 flanker_spacing = _CONFIG.get("flanker_spacing", 2)
 flanker_build_cooldown = _CONFIG.get("flanker_build_cooldown", 30)
 
+# Attack parking spot configuration
+attack_parking_spot_distance = _CONFIG.get("attack_parking_spot_distance", 20.0)
+attack_parking_spot_spread = _CONFIG.get("attack_parking_spot_spread", 5.0)
+
+# Fleet awareness configuration
+fleet_awareness_radius = _CONFIG.get("fleet_awareness_radius", 35.0)
+fleet_engagement_priority_distance = _CONFIG.get("fleet_engagement_priority_distance", 20.0)
+
 # Colony level progression order
 COLONY_LEVEL_ORDER = [
 	ColonyLevel.Colony,
@@ -81,6 +89,13 @@ class Colony:
 		self.last_flanker_build_time = 0  # Track last time flankers were built
 		self._fleet_patrol_cooldowns = {}  # Track when each fleet last got new patrol waypoints
 		self._fleet_waypoint_timers = {}  # Track when each waypoint was set for time-based rotation
+		
+		# Colony-level attack coordination
+		self.attack_target_colony_id: Optional[str] = None  # ID of colony being attacked
+		self.attack_decision_time = 0.0  # Last time colony made attack decision
+		self.attack_decision_cooldown = 10.0  # Seconds between attack decisions
+		self._fleet_parking_spots: Dict[str, Vector3] = {}  # fleet_id -> assigned parking spot position
+		self._all_colonies_cache: Optional[List['Colony']] = None  # Temporary cache for all colonies
 
 	def to_dict(self):
 		return self.colony.dict()
@@ -133,11 +148,24 @@ class Colony:
 		self._mark_changed()
 
 	def remove_fleet(self, fleet_id: str):
+		"""Remove a specific fleet by ID."""
 		if not self.colony.colonyFleet:
 			return
+		
+		# Store old list for debugging potential issues
 		old_count = len(self.colony.colonyFleet)
+		
+		# Filter out only the fleet with matching ID
 		self.colony.colonyFleet = [f for f in self.colony.colonyFleet if f.id != fleet_id]
-		if len(self.colony.colonyFleet) != old_count:
+		
+		new_count = len(self.colony.colonyFleet)
+		removed_count = old_count - new_count
+		
+		# Defensive check: warn if we removed more than one fleet (shouldn't happen)
+		if removed_count > 1:
+			print(f"WARNING: Removed {removed_count} fleets when trying to remove fleet {fleet_id}")
+		
+		if removed_count > 0:
 			self._mark_changed()
 
 	def change_residents(self, delta: int):
@@ -154,9 +182,55 @@ class Colony:
 		if delta_time is None:
 			delta_time = 0.5  # Default tick rate
 		
+		# Cache all colonies for fleet spawning
+		self._all_colonies_cache = all_colonies
+		
+		# Colony-level attack decision making
+		if all_colonies:
+			# Check if we should initiate a new attack
+			if self._should_initiate_attack(all_colonies):
+				target = self._select_attack_target(all_colonies)
+				if target:
+					self._order_colony_wide_attack(target, all_colonies)
+			
+			# Check if current attack target is still valid
+			if self.attack_target_colony_id:
+				target_still_exists = False
+				my_owner = self.colony.owner_id
+				for other in all_colonies:
+					if other.colony.id == self.attack_target_colony_id:
+						other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+						if other_owner != my_owner:
+							target_still_exists = True
+						break
+				
+				# If target no longer exists or was conquered, clear attack
+				if not target_still_exists:
+					self.attack_target_colony_id = None
+					self._fleet_parking_spots = {}
+		
 		# Handle combat behavior first
 		if all_colonies:
 			self.update_combat(delta_time, all_colonies)
+			
+			# Check if ongoing attack should be terminated
+			if self.attack_target_colony_id:
+				# Check if any fleets are still actively attacking this target
+				fleets_attacking_target = [
+					f for f in (self.colony.colonyFleet or [])
+					if f.target and f.target.id == self.attack_target_colony_id
+				]
+				
+				# If no fleets are attacking the target anymore, clear the attack
+				if not fleets_attacking_target:
+					self.attack_target_colony_id = None
+					self._fleet_parking_spots = {}
+				else:
+					# Reinforce: Check for newly idle/patrolling fleets that should join the attack
+					for target_col in all_colonies:
+						if target_col.colony.id == self.attack_target_colony_id:
+							self._reinforce_attack(target_col, all_colonies)
+							break
 
 		# Update fleets every tick (movement and behavior)
 		self.update_fleets(delta_time, all_colonies)
@@ -663,7 +737,18 @@ class Colony:
 		if not self.colony.colonyFleet:
 			return
 		
-		for fleet in self.colony.colonyFleet:
+		# Create a copy to prevent modification-during-iteration issues
+		fleets_to_update = list(self.colony.colonyFleet)
+		
+		for fleet in fleets_to_update:
+			# Verify fleet still exists (might have been removed during combat)
+			if fleet not in self.colony.colonyFleet:
+				continue
+				
+			# First, check awareness - fleets should be aware of their surroundings
+			if all_colonies and fleet.state != "Attacking":
+				self._update_fleet_awareness(fleet, all_colonies)
+			
 			self._update_fleet_movement(fleet, delta_time, all_colonies)
 			self._update_fleet_behavior(fleet, all_colonies)
 
@@ -841,12 +926,11 @@ class Colony:
 		if fleet.state == "Attacking":
 			return
 
-		# Aggressive/Defensive logic: Search for targets if Idle/Patrolling
-		if self.colony.trait != ColonyTrait.Pacifist.value and all_colonies:
-			# Cooldown for target searching to save CPU?
-			# Using patrol cooldown somewhat limits frequency of re-evaluating behavior
-			pass
-
+		# Don't interfere with fleets that are part of a coordinated attack
+		if fleet.target and fleet.target.id == self.attack_target_colony_id:
+			# This fleet is part of the attack, let it continue
+			return
+		
 		# Only generate new waypoints for idle/patrolling fleets with no waypoints
 		if fleet.state not in ["Idle", "Patrolling"]:
 			return
@@ -864,30 +948,13 @@ class Colony:
 		# Update the cooldown timer
 		self._fleet_patrol_cooldowns[fleet.id] = current_time
 		
-		# Try to find a target for aggression before resuming patrol
-		if self.colony.trait in [ColonyTrait.Aggressive.value, ColonyTrait.Defensive.value] and all_colonies:
-			# Aggressive attacks more often, Defensive checks range?
-			chance = 0.5 if self.colony.trait == ColonyTrait.Aggressive.value else 0.2
-			if random.random() < chance:
-				target_info = self._find_target(fleet, all_colonies)
-				if target_info:
-					target_id, target_pos, target_type = target_info
-					self._order_attack_move(fleet, target_id, target_pos, all_colonies)
-					return
-		
-		# Awareness Logic: Check for nearby enemies even if not actively hunting (for Patrol/Idle)
-		if all_colonies: # Any fleet can perceive nearby threats
-			nearby_enemy = self._scan_for_enemies(fleet, all_colonies)
-			if nearby_enemy:
-				# Engage immediately
-				target_id, target_pos, _ = nearby_enemy
-				self._order_attack_move(fleet, target_id, target_pos, all_colonies)
-				return
+		# Note: Awareness checks now handled in _update_fleet_awareness
+		# which is called before this method in update_fleets
 
 		# Pacifist colonies don't move fleets aggressively
 		if self.colony.trait == ColonyTrait.Pacifist.value:
 			# Just stay near home with minimal patrol
-			self._set_patrol_waypoints(fleet, patrol_distance=0.5)
+			self._set_patrol_waypoints(fleet, all_colonies, patrol_distance=0.5)
 			return
 		
 		# Other colonies patrol actively but stay near home base
@@ -895,9 +962,9 @@ class Colony:
 		fleet_stats = _CONFIG.get("fleet_stats", {}).get(fleet.type, {})
 		patrol_radius = fleet_stats.get("patrol_radius", 1.0)
 		
-		self._set_patrol_waypoints(fleet, patrol_distance=patrol_radius)
+		self._set_patrol_waypoints(fleet, all_colonies, patrol_distance=patrol_radius)
 
-	def _set_patrol_waypoints(self, fleet: Fleet, patrol_distance: float = 1.0):
+	def _set_patrol_waypoints(self, fleet: Fleet, all_colonies: Optional[List['Colony']], patrol_distance: float = 1.0):
 		"""Generate patrol waypoints in a circle around the home position.
 		
 		All coordinates are in WORLD SPACE.
@@ -969,13 +1036,15 @@ class Colony:
 		if f_len > 0.001:
 			fx, fy, fz = fx/f_len, fy/f_len, fz/f_len
 			
-		waypoints = []
+		final_waypoints = []
+		target_points = []
 		num_waypoints = 8  # More waypoints for smoother circle
 		
 		center_x = fleet.homePosition.x
 		center_y = fleet.homePosition.y  
 		center_z = fleet.homePosition.z
 		
+		# First generate the target points on the circle
 		for i in range(num_waypoints):
 			angle = (i * 2 * math.pi / num_waypoints)
 			
@@ -991,12 +1060,41 @@ class Colony:
 			# Project this tangent point onto the Safe Orbit Shell
 			# This ensures the waypoint itself is not inside/outside the orbit
 			wp_projected = self._project_position_to_orbit(Vector3(x=wx, y=wy, z=wz))
-			waypoints.append(wp_projected)
+			target_points.append(wp_projected)
+
+		# Now generate valid paths between points
+		# Start from current fleet position to first point
+		current_start = fleet.position
 		
-		# Return to start
-		waypoints.append(waypoints[0])
+		# Filter out home colony from collision detection for patrol paths
+		# Patrol waypoints orbit the home planet, so it shouldn't be treated as an obstacle
+		other_colonies = [c for c in all_colonies if c.colony.id != self.colony.id] if all_colonies else None
 		
-		fleet.waypoints = waypoints
+		# Add path to first point
+		if other_colonies:
+			path = self._generate_path_waypoints(current_start, target_points[0], other_colonies)
+			final_waypoints.extend(path)
+		else:
+			final_waypoints.append(target_points[0])
+			
+		# Add paths between subsequent points
+		for i in range(len(target_points) - 1):
+			p1 = target_points[i]
+			p2 = target_points[i+1]
+			if other_colonies:
+				path = self._generate_path_waypoints(p1, p2, other_colonies)
+				final_waypoints.extend(path)
+			else:
+				final_waypoints.append(p2)
+		
+		# Close the loop
+		if other_colonies:
+			path = self._generate_path_waypoints(target_points[-1], target_points[0], other_colonies)
+			final_waypoints.extend(path)
+		else:
+			final_waypoints.append(target_points[0])
+		
+		fleet.waypoints = final_waypoints
 		fleet.state = "Patrolling"
 		self._mark_changed()
 
@@ -1113,6 +1211,14 @@ class Colony:
 		
 		# Update last build time
 		self.last_flanker_build_time = time.time()
+		
+		# NEW: If there's an ongoing attack, immediately add this fleet to it
+		if self.attack_target_colony_id:
+			# Find the target colony
+			for target_col in (self._get_all_colonies_cache() or []):
+				if target_col.colony.id == self.attack_target_colony_id:
+					self._add_fleet_to_attack(flanker_fleet, target_col)
+					break
 		
 		self._mark_changed()
 		
@@ -1377,27 +1483,95 @@ class Colony:
 		_, target_id, target_pos, target_type = potential_targets[0]
 		return target_id, target_pos, target_type
 
-	def _scan_for_enemies(self, fleet: Fleet, all_colonies: List['Colony']):
-		"""Quick scan for nearby enemies to react to."""
-		scan_radius = 40.0 # Detection range
+	def _scan_for_enemies(self, fleet: Fleet, all_colonies: List['Colony'], scan_radius: Optional[float] = None):
+		"""Scan for nearby enemy fleets within detection radius.
+		
+		Args:
+			fleet: The fleet doing the scanning
+			all_colonies: All colonies in the game
+			scan_radius: Optional custom scan radius (defaults to config value)
+			
+		Returns:
+			Tuple of (fleet_id, position, type, distance, owner_colony) or None
+		"""
+		if scan_radius is None:
+			scan_radius = fleet_awareness_radius
+		
+		# Ensure we have a valid radius
+		actual_radius: float = float(scan_radius) if scan_radius is not None else 35.0
+			
 		my_owner = self.colony.owner_id
 		
-		closest_dist = scan_radius
+		closest_dist: float = actual_radius
 		closest = None
 		
-		# Check fleets only (bases are usually too far to just stumble upon unless attacking)
+		# Check fleets from all enemy colonies
 		for other in all_colonies:
+			if other.colony.id == self.colony.id:
+				continue
+				
 			other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
-			if other_owner == my_owner: continue
+			if other_owner == my_owner:
+				continue
 			
 			if other.colony.colonyFleet:
 				for f in other.colony.colonyFleet:
 					dist = self._distance_v3(fleet.position, f.position)
 					if dist < closest_dist:
 						closest_dist = dist
-						closest = (f.id, f.position, "Fleet")
+						closest = (f.id, f.position, "Fleet", dist, other)
 		
 		return closest
+
+	def _update_fleet_awareness(self, fleet: Fleet, all_colonies: List['Colony']):
+		"""Update fleet awareness and handle automatic engagement of nearby enemies."""
+		# Pacifist fleets don't engage
+		if self.colony.trait == ColonyTrait.Pacifist.value:
+			return
+		
+		# Scan for nearby enemies
+		nearby_enemy = self._scan_for_enemies(fleet, all_colonies)
+		if not nearby_enemy:
+			return
+		
+		enemy_id, enemy_pos, enemy_type, distance, enemy_colony = nearby_enemy
+		
+		# Decision logic based on fleet state and distance
+		should_engage = False
+		
+		if fleet.state == "Idle":
+			# Idle fleets always engage nearby enemies
+			should_engage = True
+			
+		elif fleet.state == "Patrolling":
+			# Patrolling fleets engage if enemy is close enough (priority threat)
+			if distance < fleet_engagement_priority_distance:
+				should_engage = True
+			
+		elif fleet.state == "Moving":
+			# Moving fleets engage if:
+			# 1. Enemy is very close (immediate threat)
+			# 2. OR they're not on a coordinated attack mission
+			if distance < fleet_engagement_priority_distance:
+				should_engage = True
+			elif not (fleet.target and fleet.target.id == self.attack_target_colony_id):
+				# Not on coordinated attack, can intercept
+				if distance < fleet_awareness_radius * 0.7:  # Within 70% of awareness radius
+					should_engage = True
+		
+		# Already attacking someone else - only switch if this enemy is much closer
+		if fleet.state == "Attacking" and fleet.target:
+			# Don't switch targets unless this is significantly closer
+			return
+		
+		if should_engage:
+			# Check if we're already targeting this enemy
+			if fleet.target and fleet.target.id == enemy_id:
+				return
+			
+			# Engage the enemy
+			self._order_attack_move(fleet, enemy_id, enemy_pos, all_colonies)
+			self._mark_changed()
 
 	def _get_detour_point(self, start: Vector3, end: Vector3, center: Vector3, radius: float) -> Optional[Vector3]:
 		"""Calculate a detour point if the segment intersects the sphere."""
@@ -1552,11 +1726,304 @@ class Colony:
 		fleet.state = "Moving"
 		self._mark_changed()
 
+	def _calculate_parking_spots(self, target_colony: 'Colony', num_spots: int) -> List[Vector3]:
+		"""Calculate parking spot positions around a target colony for attacking fleets.
+		
+		Spots are arranged in a sphere around the target colony's base position.
+		"""
+		target_base_pos = target_colony._get_planet_base_position()
+		target_planet_pos = target_colony.colony.planet.position
+		
+		# Calculate outward normal from planet center to base
+		nx = target_base_pos.x - target_planet_pos.x
+		ny = target_base_pos.y - target_planet_pos.y
+		nz = target_base_pos.z - target_planet_pos.z
+		n_len = math.sqrt(nx*nx + ny*ny + nz*nz)
+		
+		if n_len > 0.001:
+			nx, ny, nz = nx/n_len, ny/n_len, nz/n_len
+		else:
+			nx, ny, nz = 0, 1, 0
+		
+		parking_spots = []
+		
+		# Create a coordinate system with the normal as "up"
+		# Find a perpendicular "right" vector
+		if abs(ny) > 0.9:
+			# Normal is close to Y axis, use X as reference
+			rx, ry, rz = 1, 0, 0
+		else:
+			# Normal is not Y, use Y as reference
+			rx, ry, rz = 0, 1, 0
+		
+		# Right = Cross(Reference, Normal)
+		t_rx = ry*nz - rz*ny
+		t_ry = rz*nx - rx*nz
+		t_rz = rx*ny - ry*nx
+		
+		# Normalize Right
+		t_len = math.sqrt(t_rx*t_rx + t_ry*t_ry + t_rz*t_rz)
+		if t_len > 0.001:
+			t_rx, t_ry, t_rz = t_rx/t_len, t_ry/t_len, t_rz/t_len
+		else:
+			t_rx, t_ry, t_rz = 1, 0, 0
+		
+		# Forward = Cross(Normal, Right)
+		fx = ny*t_rz - nz*t_ry
+		fy = nz*t_rx - nx*t_rz
+		fz = nx*t_ry - ny*t_rx
+		
+		# Normalize Forward
+		f_len = math.sqrt(fx*fx + fy*fy + fz*fz)
+		if f_len > 0.001:
+			fx, fy, fz = fx/f_len, fy/f_len, fz/f_len
+		
+		# Generate spots in a spherical pattern around the base
+		# Use golden spiral or simple angular distribution
+		for i in range(num_spots):
+			# Use spherical coordinates with some randomness
+			theta = (i * 2 * math.pi / num_spots) + random.uniform(-0.3, 0.3)  # Horizontal angle
+			phi = random.uniform(math.pi/6, math.pi/3)  # Vertical angle from normal (30-60 degrees)
+			
+			# Radial distance with some spread
+			radius = attack_parking_spot_distance + random.uniform(-attack_parking_spot_spread, attack_parking_spot_spread)
+			
+			# Convert spherical to Cartesian in local coordinate system
+			# x = radius * sin(phi) * cos(theta)
+			# y = radius * sin(phi) * sin(theta)  
+			# z = radius * cos(phi)
+			
+			local_x = radius * math.sin(phi) * math.cos(theta)
+			local_y = radius * math.sin(phi) * math.sin(theta)
+			local_z = radius * math.cos(phi)
+			
+			# Transform to world space using our coordinate system
+			# Position = Base + local_x*Right + local_y*Forward + local_z*Normal
+			spot_x = target_base_pos.x + local_x*t_rx + local_y*fx + local_z*nx
+			spot_y = target_base_pos.y + local_x*t_ry + local_y*fy + local_z*ny
+			spot_z = target_base_pos.z + local_x*t_rz + local_y*fz + local_z*nz
+			
+			parking_spots.append(Vector3(x=spot_x, y=spot_y, z=spot_z))
+		
+		return parking_spots
+
+	def _assign_parking_spots_to_fleets(self, fleets: List[Fleet], target_colony: 'Colony'):
+		"""Assign parking spots to fleets for coordinated attack."""
+		if not fleets:
+			return
+		
+		# Calculate parking spots
+		parking_spots = self._calculate_parking_spots(target_colony, len(fleets))
+		
+		# Clear old assignments
+		self._fleet_parking_spots = {}
+		
+		# Assign spots to fleets (closest fleet gets closest spot for efficiency)
+		remaining_fleets = fleets.copy()
+		remaining_spots = parking_spots.copy()
+		
+		while remaining_fleets and remaining_spots:
+			# Find the fleet-spot pair with minimum distance
+			best_fleet = None
+			best_spot = None
+			min_dist = float('inf')
+			
+			for fleet in remaining_fleets:
+				for spot in remaining_spots:
+					dist = self._distance_v3(fleet.position, spot)
+					if dist < min_dist:
+						min_dist = dist
+						best_fleet = fleet
+						best_spot = spot
+			
+			if best_fleet and best_spot:
+				self._fleet_parking_spots[best_fleet.id] = best_spot
+				remaining_fleets.remove(best_fleet)
+				remaining_spots.remove(best_spot)
+
+	def _should_initiate_attack(self, all_colonies: List['Colony']) -> bool:
+		"""Decide if colony should initiate an attack based on trait, resources, and cooldown."""
+		current_time = time.time()
+		
+		# Check cooldown
+		if current_time - self.attack_decision_time < self.attack_decision_cooldown:
+			return False
+		
+		# Pacifist colonies never initiate attacks
+		if self.colony.trait == ColonyTrait.Pacifist.value:
+			return False
+		
+		# Must have at least one fleet
+		if not self.colony.colonyFleet or len(self.colony.colonyFleet) == 0:
+			return False
+		
+		# Don't initiate new attack if already attacking
+		if self.attack_target_colony_id is not None:
+			return False
+		
+		# Check if any enemy colonies exist
+		my_owner = self.colony.owner_id
+		has_enemies = False
+		for other in all_colonies:
+			if other.colony.id == self.colony.id:
+				continue
+			other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+			if other_owner != my_owner:
+				has_enemies = True
+				break
+		
+		if not has_enemies:
+			return False
+		
+		# Trait-based decision
+		if self.colony.trait == ColonyTrait.Aggressive.value:
+			# Aggressive colonies attack frequently
+			return random.random() < 0.7
+		elif self.colony.trait == ColonyTrait.Defensive.value:
+			# Defensive colonies attack less frequently
+			return random.random() < 0.3
+		elif self.colony.trait == ColonyTrait.Economic.value:
+			# Economic colonies rarely attack
+			return random.random() < 0.1
+		
+		return False
+
+	def _select_attack_target(self, all_colonies: List['Colony']) -> Optional['Colony']:
+		"""Select an enemy colony to attack."""
+		my_owner = self.colony.owner_id
+		my_base_pos = self._get_planet_base_position()
+		
+		potential_targets = []
+		
+		for other in all_colonies:
+			if other.colony.id == self.colony.id:
+				continue
+			other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+			if other_owner == my_owner:
+				continue
+			
+			# Calculate distance to target
+			other_base_pos = other._get_planet_base_position()
+			dist = self._distance_v3(my_base_pos, other_base_pos)
+			
+			potential_targets.append((dist, other))
+		
+		if not potential_targets:
+			return None
+		
+		# Sort by distance and pick closest (or could use other strategies)
+		potential_targets.sort(key=lambda x: x[0])
+		
+		# Aggressive colonies might prefer weaker targets
+		if self.colony.trait == ColonyTrait.Aggressive.value:
+			# Pick from closest 3 based on weakness
+			candidates = potential_targets[:min(3, len(potential_targets))]
+			# Sort by residents (weaker = fewer residents)
+			candidates.sort(key=lambda x: x[1].colony.residents)
+			return candidates[0][1] if candidates else None
+		
+		# Default: attack closest
+		return potential_targets[0][1]
+
+	def _order_colony_wide_attack(self, target_colony: 'Colony', all_colonies: List['Colony']):
+		"""Order all available fleets to attack the target colony in coordinated fashion."""
+		if not self.colony.colonyFleet:
+			return
+		
+		# Filter available fleets (not already attacking this target)
+		available_fleets = [
+			f for f in self.colony.colonyFleet 
+			if f.state in ["Idle", "Patrolling"] and 
+			   (not f.target or f.target.id != target_colony.colony.id)
+		]
+		
+		if not available_fleets:
+			return
+		
+		# Set colony-level attack target
+		self.attack_target_colony_id = target_colony.colony.id
+		self.attack_decision_time = time.time()
+		
+		# Assign parking spots to ALL fleets (including already attacking ones)
+		all_attacking_fleets = [
+			f for f in self.colony.colonyFleet
+			if f.target and f.target.id == target_colony.colony.id
+		] + available_fleets
+		
+		self._assign_parking_spots_to_fleets(all_attacking_fleets, target_colony)
+		
+		# Get target information
+		target_base_pos = target_colony._get_planet_base_position()
+		target_id = target_colony.colony.id
+		
+		# Order each NEW fleet to move to its assigned parking spot
+		for fleet in available_fleets:
+			self._add_fleet_to_attack(fleet, target_colony)
+		
+		self._mark_changed()
+		self._add_action_event(f"Ordered attack on {target_colony.colony.name}", "military")
+
+	def _add_fleet_to_attack(self, fleet: Fleet, target_colony: 'Colony'):
+		"""Add a single fleet to the ongoing attack on target_colony."""
+		# Get or assign parking spot
+		if fleet.id not in self._fleet_parking_spots:
+			# Calculate a new parking spot for this fleet
+			new_spots = self._calculate_parking_spots(target_colony, 1)
+			if new_spots:
+				self._fleet_parking_spots[fleet.id] = new_spots[0]
+		
+		parking_spot = self._fleet_parking_spots.get(fleet.id)
+		if not parking_spot:
+			return
+		
+		# Get target information
+		target_base_pos = target_colony._get_planet_base_position()
+		target_id = target_colony.colony.id
+		
+		# Generate path to parking spot
+		all_colonies = self._all_colonies_cache or []
+		waypoints = self._generate_path_waypoints(fleet.position, parking_spot, all_colonies)
+		
+		fleet.waypoints = waypoints
+		fleet.target = FleetTarget(id=target_id, position=target_base_pos)
+		fleet.state = "Moving"
+		self._mark_changed()
+
+	def _reinforce_attack(self, target_colony: 'Colony', all_colonies: List['Colony']):
+		"""Add any newly available fleets to an ongoing attack."""
+		if not self.colony.colonyFleet:
+			return
+		
+		# Find fleets that are idle/patrolling and not yet assigned to this attack
+		new_reinforcements = [
+			f for f in self.colony.colonyFleet
+			if f.state in ["Idle", "Patrolling"] and
+			   (not f.target or f.target.id != self.attack_target_colony_id)
+		]
+		
+		if not new_reinforcements:
+			return
+		
+		# Add each reinforcement to the attack
+		for fleet in new_reinforcements:
+			self._add_fleet_to_attack(fleet, target_colony)
+
+	def _get_all_colonies_cache(self) -> Optional[List['Colony']]:
+		"""Get cached list of all colonies (for use in spawning callbacks)."""
+		return self._all_colonies_cache
+
 	def update_combat(self, delta_time: float, all_colonies: List['Colony']):
 		"""Handle combat logic for fleets and base."""
 		# 1. Fleets
+		# Create a copy of the fleet list to avoid modification-during-iteration issues
 		if self.colony.colonyFleet:
-			for fleet in self.colony.colonyFleet:
+			# Make a shallow copy of the list (not the fleet objects)
+			fleets_to_process = list(self.colony.colonyFleet)
+			for fleet in fleets_to_process:
+				# Verify fleet still exists (might have been removed in previous iteration)
+				if fleet not in self.colony.colonyFleet:
+					continue
+					
 				if fleet.isAttacking and fleet.target and fleet.target.id:
 					self._resolve_fleet_combat(fleet, delta_time, all_colonies)
 
@@ -1659,8 +2126,16 @@ class Colony:
 			current_hp = float(fleet_obj.hpPool) if fleet_obj.hpPool is not None else 100.0
 			fleet_obj.hpPool = current_hp - damage
 			if fleet_obj.hpPool <= 0:
+				# Log fleet destruction for debugging
+				print(f"Fleet {fleet_obj.id} destroyed. Target colony {target_colony.colony.name} had {len(target_colony.colony.colonyFleet) if target_colony.colony.colonyFleet else 0} fleets.")
+				
 				target_colony.remove_fleet(fleet_obj.id)
 				target_colony._add_action_event("Fleet destroyed!", "combat")
+				
+				# Verify removal
+				remaining_fleets = len(target_colony.colony.colonyFleet) if target_colony.colony.colonyFleet else 0
+				print(f"After removal, target colony has {remaining_fleets} fleets.")
+				
 				fleet.isAttacking = False
 				fleet.target = None
 				fleet.state = "Idle"
@@ -1726,7 +2201,15 @@ class Colony:
 			# Reduced damage from 20.0 to 12.0
 			closest_enemy.hpPool = current_hp - (12.0 * delta_time)
 			if closest_enemy.hpPool <= 0:
+				# Log for debugging
+				print(f"Base defense destroyed fleet {closest_enemy.id}. Colony {closest_colony.colony.name} had {len(closest_colony.colony.colonyFleet) if closest_colony.colony.colonyFleet else 0} fleets.")
+				
 				closest_colony.remove_fleet(closest_enemy.id)
+				
+				# Verify removal
+				remaining_fleets = len(closest_colony.colony.colonyFleet) if closest_colony.colony.colonyFleet else 0
+				print(f"After base defense removal, colony has {remaining_fleets} fleets.")
+				
 				self.colony.is_fighting = False
 				self.colony.defense_target_id = None
 				self.colony.defense_target_pos = None

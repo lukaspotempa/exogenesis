@@ -29,7 +29,7 @@ export function SpaceshipFlanker({ colonyColor, isAttacking, target }: ShipProps
   const { nodes: n, materials: m } = useGLTF('/models/fleet/Spaceship_Flanker.glb') as unknown as TrackGLTF
 
   const groupRef = useRef<THREE.Group | null>(null);
-  const projectilesRef = useRef<Array<{ id: string; mesh: THREE.Mesh; velocity: THREE.Vector3; ttl: number }>>([]);
+  const projectilesRef = useRef<Array<{ id: string; mesh: THREE.Mesh; velocity: THREE.Vector3; ttl: number; targetPos: THREE.Vector3 }>>([]);
   const fireCooldownRef = useRef<number>(0);
   const { scene } = useThree();
 
@@ -60,9 +60,22 @@ export function SpaceshipFlanker({ colonyColor, isAttacking, target }: ShipProps
         const remaining: typeof projectilesRef.current = [];
         projectilesRef.current.forEach(p => {
           p.ttl -= delta;
+          const prevPos = p.mesh.position.clone();
           p.mesh.position.addScaledVector(p.velocity, delta); // mesh in scene (world coords)
-          if (p.ttl > 0) remaining.push(p);
-          else if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+          
+          // Check if projectile has reached or passed the target
+          const distToTarget = p.mesh.position.distanceTo(p.targetPos);
+          const prevDistToTarget = prevPos.distanceTo(p.targetPos);
+          
+          // If we're now farther from target than before, or very close, we've hit/passed it
+          if (distToTarget > prevDistToTarget || distToTarget < 0.5) {
+            // Hit! Remove projectile
+            if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+          } else if (p.ttl > 0) {
+            remaining.push(p);
+          } else {
+            if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+          }
         });
         if (remaining.length !== projectilesRef.current.length) projectilesRef.current = remaining;
       }
@@ -89,8 +102,8 @@ export function SpaceshipFlanker({ colonyColor, isAttacking, target }: ShipProps
         scene.add(mesh);
 
         const id = String(Math.random()).slice(2);
-        const ttl = origin.distanceTo(targetPos) / speed + 0.1;
-        projectilesRef.current.push({ id, mesh, velocity: dir.multiplyScalar(speed), ttl });
+        const ttl = origin.distanceTo(targetPos) / speed + 1.0; // Buffer for safety
+        projectilesRef.current.push({ id, mesh, velocity: dir.multiplyScalar(speed), ttl, targetPos });
       }
 
       raf = requestAnimationFrame(loop);

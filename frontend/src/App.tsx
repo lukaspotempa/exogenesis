@@ -3,6 +3,7 @@ import { OrbitControls } from '@react-three/drei'
 import './styles.css'
 import './assets/UI.css'
 import { MainScene } from './components/Scene/MainScene'
+import { GalaxySkybox } from './components/Scene/GalaxySkybox'
 import ColonyList from './components/UI/ColonyList'
 import PlanetDetails from './components/UI/PlanetDetails'
 import ActionLog from './components/UI/ActionLog'
@@ -259,6 +260,7 @@ function App() {
             />
 
             <MainScene />
+            <GalaxySkybox />
 
             {/* Controls */}
             <OrbitControls

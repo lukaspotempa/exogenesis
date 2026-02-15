@@ -10,6 +10,7 @@ import { BaseFlag } from './structures/BaseFlag';
 import { OilPump } from './structures/OilPump';
 import { SteelFactory } from './structures/SteelFactory';
 import { BaseDefenseSystem } from './structures/BaseDefenseSystem';
+import { FleetExplosion } from './effects/FleetExplosion';
 
 // Map colony levels to their corresponding base structure components
 const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyColor?: string }>> = {
@@ -68,6 +69,11 @@ interface RaycastResult {
   normal: THREE.Vector3;
 }
 
+interface ExplosionEffect {
+  id: string;
+  position: THREE.Vector3;
+}
+
 // Constants
 const COORDINATE_SCALE = 50;
 const BASE_OFFSET = 0.01;
@@ -83,6 +89,8 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   const [placedFleets, setPlacedFleets] = useState<PlacedFleet[]>([]);
   const [placedOilPumps, setPlacedOilPumps] = useState<PlacedStructure[]>([]);
   const [placedSteelFactories, setPlacedSteelFactories] = useState<PlacedStructure[]>([]);
+  const [explosions, setExplosions] = useState<ExplosionEffect[]>([]);
+  const previousFleetsRef = useRef<Map<string, THREE.Vector3>>(new Map());
 
   // Define structures to be placed at the colony site.
   const colonyObjects: StructureConfig[] = useMemo(() => [
@@ -448,6 +456,28 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     });
 
     setPlacedFleets(results);
+    
+    // Track fleet removals and create explosions
+    const currentFleetIds = new Set(colony.colonyFleet.map(f => f.id));
+    const previousFleets = previousFleetsRef.current;
+    
+    // Check for removed fleets
+    previousFleets.forEach((worldPos, fleetId) => {
+      if (!currentFleetIds.has(fleetId)) {
+        // Fleet was removed - create explosion at its last known world position
+        setExplosions(prev => [...prev, {
+          id: `explosion-${fleetId}-${Date.now()}`,
+          position: worldPos.clone()
+        }]);
+      }
+    });
+    
+    // Update previous fleets map with current fleet positions (in world space)
+    const newPreviousFleets = new Map<string, THREE.Vector3>();
+    colony.colonyFleet.forEach(fleet => {
+      newPreviousFleets.set(fleet.id, new THREE.Vector3(fleet.position.x, fleet.position.y, fleet.position.z));
+    });
+    previousFleetsRef.current = newPreviousFleets;
   }, [colony.colonyFleet, fleetComponentMap, basePosition, baseRotation]);
 
   // Calculate the inverse of the planet's rotation to keep fleets upright
@@ -458,6 +488,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   }, [rot.x, rot.y, rot.z]);
 
   return (
+    <>
     <group
       ref={planetGroupRef}
       position={[position.x, position.y, position.z]}
@@ -530,5 +561,20 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
         );
       })}
     </group>
+    
+    {/* Explosion effects - rendered outside planet group in world space */}
+    <>
+      {explosions.map((explosion) => (
+        <FleetExplosion
+          key={explosion.id}
+          position={explosion.position}
+          onComplete={() => {
+            // Remove explosion after it completes
+            setExplosions(prev => prev.filter(e => e.id !== explosion.id));
+          }}
+        />
+      ))}
+    </>
+    </>
   );
 }
