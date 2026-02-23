@@ -11,6 +11,7 @@ import { OilPump } from './structures/OilPump';
 import { SteelFactory } from './structures/SteelFactory';
 import { BaseDefenseSystem } from './structures/BaseDefenseSystem';
 import { FleetExplosion } from './effects/FleetExplosion';
+import { registerFlagPosition, getFlagPosition, unregisterFlagPosition } from '../../store/flagPositionRegistry';
 
 // Map colony levels to their corresponding base structure components
 const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyColor?: string }>> = {
@@ -91,6 +92,11 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   const [placedSteelFactories, setPlacedSteelFactories] = useState<PlacedStructure[]>([]);
   const [explosions, setExplosions] = useState<ExplosionEffect[]>([]);
   const previousFleetsRef = useRef<Map<string, THREE.Vector3>>(new Map());
+
+  // Unregister flag position on unmount
+  useEffect(() => {
+    return () => unregisterFlagPosition(colony.id);
+  }, [colony.id]);
 
   // Define structures to be placed at the colony site.
   const colonyObjects: StructureConfig[] = useMemo(() => [
@@ -207,9 +213,10 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
   // Map fleet types to components. Add more mappings here as new fleet components are created.
   const fleetComponentMap = useMemo(() => ({
     Attacker: FleetAttacker,
-    Flanker: FleetAttacker,  // Flankers use the same component, formation handled by count
-    // Fighter: FleetFighter,
-    // Bomber: FleetBomber,
+    Flanker: FleetAttacker,
+    Fighter: FleetAttacker,
+    Bomber: FleetAttacker,
+    Scout: FleetAttacker,
   } as Record<string, React.ComponentType<FleetComponentProps>>), []);
 
   // Calculate base position and rotation on planet surface
@@ -285,11 +292,19 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
     });
 
     setPlacedStructures(results);
+
+    // Register the flag's world position so attacking fleets can aim at it.
+    // The flag is the second colony object (index 1).
+    if (results.length > 1 && planetGroupRef.current) {
+      const flagWorldPos = planetGroupRef.current.localToWorld(results[1].position.clone());
+      registerFlagPosition(colony.id, flagWorldPos);
+    }
   }, [
     basePosition, 
     baseRotation, 
     colonyObjects,
     colony.colonyLevel,
+    colony.id,
     setupPlanetMesh, 
     raycastToSurface, 
     transformOffsetToWorldSpace, 
@@ -408,16 +423,14 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
       return;
     }
 
-    const planetGroup = planetGroupRef.current;
     const results: PlacedFleet[] = [];
 
-    // Get the surface normal at the base position
-    const planetCenter = new THREE.Vector3();
-    planetGroup.getWorldPosition(planetCenter);
-    const surfaceNormal = basePosition.clone().sub(planetCenter).normalize();
-    
-    // Spawn height for fleets above the base
-    const fleetSpawnHeight = 3.0;
+    // The fleet wrapper group has planetInverseRotation, which cancels the planet's
+    // rotation. Its effective world transform is: T(planetPos) * S(scale).
+    // So wrapper-local coords = (worldPos - planetPos) / scale.
+    // We must convert positions/velocities/waypoints to this wrapper-local space,
+    // NOT to the planet-local space (which includes rotation).
+    const planetPos = new THREE.Vector3(position.x, position.y, position.z);
 
     colony.colonyFleet.forEach((fleet) => {
       const comp = fleetComponentMap[fleet.type] ?? FleetAttacker;
@@ -426,31 +439,39 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
       // (converted to local space) is relative to the planet center.
       const localPos = new THREE.Vector3(0, 0, 0);
       
-      // Get planet's world rotation for transforming vectors from world to local space
-      const planetWorldQuat = new THREE.Quaternion();
-      planetGroup.getWorldQuaternion(planetWorldQuat);
-      const planetWorldQuatInverse = planetWorldQuat.clone().invert();
-      
-      // Convert world space position to local planet space for rendering
+      // Convert world space position to wrapper-local space for rendering
+      // wrapper-local = (worldPos - planetPos) / scale
       const worldFleetPos = new THREE.Vector3(fleet.position.x, fleet.position.y, fleet.position.z);
-      const localFleetPos = planetGroup.worldToLocal(worldFleetPos.clone());
+      const localFleetPos = worldFleetPos.clone().sub(planetPos).divideScalar(scale);
       
-      // Convert world space velocity to local planet space
-      // Velocity is a direction vector, so we only apply rotation (not translation)
+      // Convert world space velocity to wrapper-local space
+      // Since wrapper has no rotation, velocity just needs scale adjustment
       const worldVelocity = new THREE.Vector3(fleet.velocity.x, fleet.velocity.y, fleet.velocity.z);
-      const localVelocity = worldVelocity.clone().applyQuaternion(planetWorldQuatInverse);
+      const localVelocity = worldVelocity.clone().divideScalar(scale);
       
       const localFleetProp: Fleet = { 
         ...fleet, 
         position: { x: localFleetPos.x, y: localFleetPos.y, z: localFleetPos.z },
         velocity: { x: localVelocity.x, y: localVelocity.y, z: localVelocity.z },
-        // Also convert waypoints to local space if they exist
+        // Also convert waypoints to wrapper-local space if they exist
         waypoints: fleet.waypoints?.map(wp => {
           const worldWP = new THREE.Vector3(wp.x, wp.y, wp.z);
-          const localWP = planetGroup.worldToLocal(worldWP.clone());
+          const localWP = worldWP.clone().sub(planetPos).divideScalar(scale);
           return { x: localWP.x, y: localWP.y, z: localWP.z };
         })
       };
+
+      // Override target position with the actual rendered flag world position
+      // so projectiles aim at the visible flag, not the backend's approximation.
+      if (localFleetProp.target?.id) {
+        const actualFlagPos = getFlagPosition(localFleetProp.target.id);
+        if (actualFlagPos) {
+          localFleetProp.target = {
+            ...localFleetProp.target,
+            position: { x: actualFlagPos.x, y: actualFlagPos.y, z: actualFlagPos.z }
+          };
+        }
+      }
 
       results.push({ component: comp, localPosition: localPos, fleetProp: localFleetProp });
     });
@@ -478,7 +499,7 @@ export function Colony({ colony }: ColonyProps): React.JSX.Element {
       newPreviousFleets.set(fleet.id, new THREE.Vector3(fleet.position.x, fleet.position.y, fleet.position.z));
     });
     previousFleetsRef.current = newPreviousFleets;
-  }, [colony.colonyFleet, fleetComponentMap, basePosition, baseRotation]);
+  }, [colony.colonyFleet, fleetComponentMap, basePosition, baseRotation, position.x, position.y, position.z, scale]);
 
   // Calculate the inverse of the planet's rotation to keep fleets upright
   const planetInverseRotation = useMemo(() => {

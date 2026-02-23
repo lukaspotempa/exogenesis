@@ -5,6 +5,9 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import type { Group } from 'three';
 import { SpaceshipFlanker } from '../../Models/ship/SpaceshipFlanker';
+import { SpaceshipFighter } from '../../Models/ship/SpaceshipFighter';
+import { SpaceshipBomber } from '../../Models/ship/SpaceshipBomber';
+import { SpaceshipScout } from '../../Models/ship/SpaceshipScout';
 
 
 interface FleetProps {
@@ -229,6 +232,19 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
     return [offsetX, 0, 0];
   };
 
+  const getShipComponent = () => {
+    switch (fleetProp.type) {
+      case 'Fighter': return SpaceshipFighter;
+      case 'Bomber': return SpaceshipBomber;
+      case 'Scout': return SpaceshipScout;
+      case 'Flanker':
+      case 'Attacker':
+      default: return SpaceshipFlanker;
+    }
+  };
+
+  const ShipComponent = getShipComponent();
+
   return (
     <group ref={groupRef} dispose={null}>
 
@@ -237,7 +253,7 @@ export function FleetAttacker({ colonyColor, fleetProp, onUpdate }: FleetProps):
         const [offsetX, offsetY, offsetZ] = getFormationOffset(i, count);
         return (
           <group key={`ship-${i}`} position={[offsetX, offsetY, offsetZ]}>
-            <SpaceshipFlanker
+            <ShipComponent
               colonyColor={colonyColor ?? '#FFFFFF'}
               isAttacking={!!fleetProp.isAttacking}
               target={fleetProp.target}

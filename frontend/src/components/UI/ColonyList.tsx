@@ -1,4 +1,3 @@
-import React from 'react'
 import type { Colony } from '../../types/Types'
 
 type Props = {

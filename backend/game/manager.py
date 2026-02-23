@@ -64,7 +64,8 @@ class GameManager:
                 "planetNaturalResources": {
                     "oil": 2.0, "steel": 2.0, "water": 2.0, "temperature": 15.0,
                     "oilStorage": 9000.0, "steelStorage": 9000.0, "waterStorage": 9000.0 # Plenty of resources
-                }
+                },
+                "oilPumps": [{"id": "init_pump_1", "position": {"x": 0.1, "y": 0.1}, "production": 1.0}] # Ensure requirements met
             }
         }
         
@@ -84,12 +85,30 @@ class GameManager:
                 "planetNaturalResources": {
                     "oil": 2.0, "steel": 2.0, "water": 2.0, "temperature": 15.0,
                     "oilStorage": 9000.0, "steelStorage": 9000.0, "waterStorage": 9000.0
-                }
+                },
+                "oilPumps": [{"id": "init_pump_2", "position": {"x": 0.1, "y": 0.1}, "production": 1.0}]
             }
         }
         
-        created.append(self.create_colony(c1_payload))
-        created.append(self.create_colony(c2_payload))
+        c1 = self.create_colony(c1_payload)
+        c2 = self.create_colony(c2_payload)
+        
+        # Manually trigger initial fleet builds for testing
+        # We need to access the Colony OBJECTS, not the dicts returned by create_colony
+        c1_obj = self.colonies[-2] # Red
+        c2_obj = self.colonies[-1] # Blue
+        
+        # Give Red some ships
+        c1_obj.build_flanker_group()
+        c1_obj.build_bomber_group()
+        c1_obj.build_scout_group()
+        
+        # Give Blue some ships
+        c2_obj.build_fighter_group()
+        c2_obj.build_scout_group()
+
+        created.append(c1)
+        created.append(c2)
         return created
     
     def clear_colonies(self):

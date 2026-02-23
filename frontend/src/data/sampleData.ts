@@ -44,6 +44,51 @@ export const sampleColonies: Colony[] = [
         type: 'Move',
         targetPos: { x: 50, y: 0, z: 0}
       }
+    },
+    {
+      id: '401',
+      type: 'Fighter',
+      label: 'Fighter Sq',
+      position: { x: 14, y: 5, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      rotation: new Quaternion(),
+      state: 'Moving',
+      tactic: 'Offensive',
+      count: 5,
+      order: {
+        type: 'Move',
+        targetPos: { x: 60, y: 10, z: 0}
+      }
+    },
+    {
+      id: '402',
+      type: 'Bomber',
+      label: 'Bomber Wing',
+      position: { x: 10, y: -5, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      rotation: new Quaternion(),
+      state: 'Moving',
+      tactic: 'Offensive',
+      count: 2,
+      order: {
+        type: 'Move',
+        targetPos: { x: 50, y: -10, z: 0}
+      }
+    },
+    {
+      id: '403',
+      type: 'Scout',
+      label: 'Scout 1',
+      position: { x: 8, y: 0, z: 5 },
+      velocity: { x: 0, y: 0, z: 0 },
+      rotation: new Quaternion(),
+      state: 'Moving',
+      tactic: 'Offensive',
+      count: 1,
+      order: {
+        type: 'Move',
+        targetPos: { x: 55, y: 0, z: 10}
+      }
     }]
   },
   {

@@ -55,6 +55,24 @@ flanker_spawn_height = _CONFIG.get("flanker_spawn_height", 5)
 flanker_spacing = _CONFIG.get("flanker_spacing", 2)
 flanker_build_cooldown = _CONFIG.get("flanker_build_cooldown", 30)
 
+# Fighter configuration
+fighter_group_size = _CONFIG.get("fighter_group_size", 5)
+fighter_steel_cost = _CONFIG.get("fighter_steel_cost", 200)
+fighter_oil_cost = _CONFIG.get("fighter_oil_cost", 100)
+fighter_build_cooldown = _CONFIG.get("fighter_build_cooldown", 25)
+
+# Bomber configuration
+bomber_group_size = _CONFIG.get("bomber_group_size", 2)
+bomber_steel_cost = _CONFIG.get("bomber_steel_cost", 400)
+bomber_oil_cost = _CONFIG.get("bomber_oil_cost", 200)
+bomber_build_cooldown = _CONFIG.get("bomber_build_cooldown", 40)
+
+# Scout configuration
+scout_group_size = _CONFIG.get("scout_group_size", 1)
+scout_steel_cost = _CONFIG.get("scout_steel_cost", 100)
+scout_oil_cost = _CONFIG.get("scout_oil_cost", 50)
+scout_build_cooldown = _CONFIG.get("scout_build_cooldown", 15)
+
 # Attack parking spot configuration
 attack_parking_spot_distance = _CONFIG.get("attack_parking_spot_distance", 20.0)
 attack_parking_spot_spread = _CONFIG.get("attack_parking_spot_spread", 5.0)
@@ -62,6 +80,12 @@ attack_parking_spot_spread = _CONFIG.get("attack_parking_spot_spread", 5.0)
 # Fleet awareness configuration
 fleet_awareness_radius = _CONFIG.get("fleet_awareness_radius", 35.0)
 fleet_engagement_priority_distance = _CONFIG.get("fleet_engagement_priority_distance", 20.0)
+
+# Base targeting height (offset above surface for projectile aiming)
+base_target_height = _CONFIG.get("base_target_height", 2.0)
+
+# Colony defense stats per level
+colony_defense_stats = _CONFIG.get("colony_defense_stats", {})
 
 # Colony level progression order
 COLONY_LEVEL_ORDER = [
@@ -79,6 +103,15 @@ class Colony:
 		self.colony = colony
 		if self.colony.owner_id is None:
 			self.colony.owner_id = self.colony.id
+		
+		# Apply defense stats (HP) from config for the current colony level
+		defense = colony_defense_stats.get(self.colony.colonyLevel.value, {})
+		initial_hp = defense.get("base_hp", 1000.0)
+		if self.colony.hp == 1000.0 and self.colony.max_hp == 1000.0:
+			# Only override defaults — don't overwrite already-customized HP
+			self.colony.hp = initial_hp
+			self.colony.max_hp = initial_hp
+		
 		self.last_residents_update = time.time()
 		self._previous_state = self.colony.dict()
 		self._has_changes = False
@@ -87,6 +120,9 @@ class Colony:
 		self._action_events = []  # Track action events for this colony
 		self.last_structure_build_time = 0 # Track last time any structure was built
 		self.last_flanker_build_time = 0  # Track last time flankers were built
+		self.last_fighter_build_time = 0 
+		self.last_bomber_build_time = 0
+		self.last_scout_build_time = 0
 		self._fleet_patrol_cooldowns = {}  # Track when each fleet last got new patrol waypoints
 		self._fleet_waypoint_timers = {}  # Track when each waypoint was set for time-based rotation
 		
@@ -461,26 +497,12 @@ class Colony:
 		
 		# Apply Planet Rotation (Euler XYZ)
 		# We need to rotate this vector by rot.x, rot.y, rot.z
-		rot = self.colony.planet.rot
-		
-		# Rotation matrices
-		# X-axis rotation
-		cx, sx = math.cos(rot.x), math.sin(rot.x)
-		y1 = uy * cx - uz * sx
-		z1 = uy * sx + uz * cx
-		x1 = ux
-		
-		# Y-axis rotation
-		cy, sy = math.cos(rot.y), math.sin(rot.y)
-		x2 = x1 * cy + z1 * sy
-		z2 = -x1 * sy + z1 * cy
-		y2 = y1
-		
-		# Z-axis rotation
-		cz, sz = math.cos(rot.z), math.sin(rot.z)
-		x3 = x2 * cz - y2 * sz
-		y3 = x2 * sz + y2 * cz
-		z3 = z2
+		# Note: Frontend renders using raycast with unrotated direction vector, 
+		# so we should NOT apply rotation here to match visual position.
+		# Ideally both should support rotation, but for now we match frontend.
+		x3 = ux
+		y3 = uy
+		z3 = uz
 		
 		# Apply Scale
 		scale = self.colony.planet.scale
@@ -498,6 +520,39 @@ class Colony:
 			y=pos.y + y_final,
 			z=pos.z + z_final
 		)
+
+	def _get_base_target_position(self) -> Vector3:
+		"""Get an elevated target position above the colony base for attack targeting.
+		
+		Returns the base surface position offset outward along the surface normal
+		so projectiles aim at the flag / visual center of the settlement.
+		The height is multiplied by the planet's scale so it remains correct
+		regardless of planet size (structures are rendered inside the scaled group).
+		"""
+		base_pos = self._get_planet_base_position()
+		planet_pos = self.colony.planet.position
+		
+		# Surface normal = direction from planet center to base
+		nx = base_pos.x - planet_pos.x
+		ny = base_pos.y - planet_pos.y
+		nz = base_pos.z - planet_pos.z
+		n_len = math.sqrt(nx*nx + ny*ny + nz*nz)
+		
+		if n_len > 0.001:
+			nx, ny, nz = nx/n_len, ny/n_len, nz/n_len
+		else:
+			nx, ny, nz = 0, 1, 0
+		
+		# Scale the height offset so it matches the visual flag height on any
+		# planet size (structures live inside the scaled planet group)
+		scaled_height = base_target_height * self.colony.planet.scale
+		
+		return Vector3(
+			x=base_pos.x + nx * scaled_height,
+			y=base_pos.y + ny * scaled_height,
+			z=base_pos.z + nz * scaled_height
+		)
+
 	def calculate_temperature_factor(self) -> float:
 		"""Calculate growth multiplier based on temperature proximity to ideal.
 		
@@ -632,6 +687,13 @@ class Colony:
 			self.colony.colonyLevel = next_level
 			self._mark_changed()
 			
+			# Apply defense stats (HP) for the new level
+			defense = colony_defense_stats.get(next_level.value, {})
+			new_max_hp = defense.get("base_hp", self.colony.max_hp)
+			self.colony.max_hp = new_max_hp
+			# Heal to new max on upgrade
+			self.colony.hp = new_max_hp
+			
 			# Log the level up event
 			self._add_action_event(f"upgraded to {next_level.value}", "level-up")
 			
@@ -678,6 +740,27 @@ class Colony:
 					return True
 			return False
 		
+		# Helper to try building any fleet type
+		def try_build_fleet():
+			# List of fleet types to try, shuffled
+			options = ["Flanker", "Fighter", "Bomber", "Scout"]
+			random.shuffle(options)
+			
+			for opt in options:
+				if opt == "Flanker" and self.can_build_flanker_group():
+					self.build_flanker_group()
+					return True
+				elif opt == "Fighter" and self.can_build_fighter_group():
+					self.build_fighter_group()
+					return True
+				elif opt == "Bomber" and self.can_build_bomber_group():
+					self.build_bomber_group()
+					return True
+				elif opt == "Scout" and self.can_build_scout_group():
+					self.build_scout_group()
+					return True
+			return False
+
 		# Pacifist: Only builds economic structures, never fleets
 		if trait == ColonyTrait.Pacifist.value:
 			try_build_economy()
@@ -690,17 +773,20 @@ class Colony:
 					return
 			
 			# If didn't build economy (either chance or cannot), maybe build fleet
-			if self.can_build_flanker_group() and random.random() < 0.2:
-				self.build_flanker_group()
+			if random.random() < 0.2:
+				try_build_fleet()
 		
 		# Aggressive: Heavily favors fleets (70% chance to prioritize fleets)
 		elif trait == ColonyTrait.Aggressive.value:
 			# Prioritize fleet building
-			if self.can_build_flanker_group() and random.random() < 0.7:
-				self.build_flanker_group()
+			if random.random() < 0.7:
+				if not try_build_fleet():
+					# Fallback to economy if can't build fleet
+					try_build_economy()
 			# Still build some economic structures (30%)
 			else:
-				try_build_economy()
+				if not try_build_economy():
+					try_build_fleet()
 		
 		# Defensive: Balanced approach (50/50 split between economy and defense)
 		elif trait == ColonyTrait.Defensive.value:
@@ -709,13 +795,10 @@ class Colony:
 				# Build economic
 				if not try_build_economy():
 					# Fallback to fleet if can't build economy
-					if self.can_build_flanker_group():
-						self.build_flanker_group()
+					try_build_fleet()
 			else:
 				# Build fleet
-				if self.can_build_flanker_group():
-					self.build_flanker_group()
-				else:
+				if not try_build_fleet():
 					# Fallback to economic if can't build fleet
 					try_build_economy()
 		
@@ -724,12 +807,9 @@ class Colony:
 			# Balanced approach. Try to build one thing.
 			if random.random() < 0.5:
 				if not try_build_economy():
-					if self.can_build_flanker_group():
-						self.build_flanker_group()
+					try_build_fleet()
 			else:
-				if self.can_build_flanker_group():
-					self.build_flanker_group()
-				else:
+				if not try_build_fleet():
 					try_build_economy()
 
 	def update_fleets(self, delta_time: float, all_colonies: Optional[List['Colony']] = None):
@@ -1116,10 +1196,10 @@ class Colony:
 		# Check max fleet groups limit
 		if self.colony.colonyLevel.value in colony_level_thresholds:
 			max_groups = colony_level_thresholds[self.colony.colonyLevel.value].get("max_fleet_groups", 1)
-			# Count current flanker fleet groups
+			# Count current fleet groups (all types)
 			if self.colony.colonyFleet:
-				flanker_fleets = sum(1 for f in self.colony.colonyFleet if f.type == "Flanker")
-				if flanker_fleets >= max_groups:
+				total_fleets = len([f for f in self.colony.colonyFleet if f.type in ["Flanker", "Fighter", "Bomber", "Scout"]])
+				if total_fleets >= max_groups:
 					return False
 		
 		# Check if we have enough resources
@@ -1226,6 +1306,283 @@ class Colony:
 		self._add_action_event(f"built a Flanker group ({flanker_group_size} ships)", "build")
 		
 		return flanker_fleet
+
+	def can_build_fighter_group(self) -> bool:
+		"""Check if the colony can build a fighter group."""
+		if not self.can_build_fleet_type("Fighter"):
+			return False
+		if time.time() - self.last_fighter_build_time < fighter_build_cooldown:
+			return False
+		if not self.colony.planet.oilPumps or len(self.colony.planet.oilPumps) < 1:
+			return False
+
+		# Check max fleet groups limit
+		if self.colony.colonyLevel.value in colony_level_thresholds:
+			max_groups = colony_level_thresholds[self.colony.colonyLevel.value].get("max_fleet_groups", 1)
+			if self.colony.colonyFleet:
+				total_fleets = len([f for f in self.colony.colonyFleet if f.type in ["Flanker", "Fighter", "Bomber", "Scout"]])
+				if total_fleets >= max_groups:
+					return False
+		
+		resources = self.colony.planet.planetNaturalResources
+		if resources.steelStorage < fighter_steel_cost:
+			return False
+		if resources.oilStorage < fighter_oil_cost:
+			return False
+		
+		return True
+
+	def build_fighter_group(self) -> Optional[Fleet]:
+		if not self.can_build_fighter_group():
+			return None
+		
+		resources = self.colony.planet.planetNaturalResources
+		resources.steelStorage -= fighter_steel_cost
+		resources.oilStorage -= fighter_oil_cost
+		
+		base_pos = self._get_planet_base_position()
+		planet_pos = self.colony.planet.position
+		
+		dx = base_pos.x - planet_pos.x
+		dy = base_pos.y - planet_pos.y
+		dz = base_pos.z - planet_pos.z
+		dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+		
+		if dist > 0.001:
+			nx, ny, nz = dx/dist, dy/dist, dz/dist
+		else:
+			nx, ny, nz = 0, 1, 0
+            
+		spawn_altitude = 3.0
+		fleet_spawn_pos = Vector3(
+			x=base_pos.x + nx * spawn_altitude,
+			y=base_pos.y + ny * spawn_altitude,
+			z=base_pos.z + nz * spawn_altitude
+		)
+		
+		if self.colony.colonyFleet is None:
+			self.colony.colonyFleet = []
+		
+		group_id = str(uuid.uuid4())[:8]
+		
+		fleet_stats = _CONFIG.get("fleet_stats", {}).get("Fighter", {})
+		fleet_speed = fleet_stats.get("speed", 6.0)
+		fleet_max_hp = fleet_stats.get("maxHP", 80.0)
+		fleet_damage = fleet_stats.get("damage", 10.0)
+		
+		fleet = Fleet(
+			id=f"fighter_{group_id}",
+			type="Fighter",
+			label=f"{self.colony.name} Fighters",
+			count=fighter_group_size,
+			position=Vector3(x=fleet_spawn_pos.x, y=fleet_spawn_pos.y, z=fleet_spawn_pos.z),
+			velocity=Vector3(x=0.0, y=0.0, z=0.0),
+			state="Idle",
+			tactic="Offensive",
+			hpPool=fleet_max_hp * fighter_group_size,
+			maxHP=fleet_max_hp,
+			damage=fleet_damage,
+			speed=fleet_speed,
+			homePosition=Vector3(x=fleet_spawn_pos.x, y=fleet_spawn_pos.y, z=fleet_spawn_pos.z)
+		)
+		
+		self._fleet_patrol_cooldowns[fleet.id] = 0
+		self.colony.colonyFleet.append(fleet)
+		self.last_fighter_build_time = time.time()
+		
+		if self.attack_target_colony_id:
+			for target_col in (self._get_all_colonies_cache() or []):
+				if target_col.colony.id == self.attack_target_colony_id:
+					self._add_fleet_to_attack(fleet, target_col)
+					break
+		
+		self._mark_changed()
+		self._add_action_event(f"built a Fighter group ({fighter_group_size} ships)", "build")
+		return fleet
+
+	def can_build_bomber_group(self) -> bool:
+		"""Check if the colony can build a bomber group."""
+		if not self.can_build_fleet_type("Bomber"):
+			return False
+		if time.time() - self.last_bomber_build_time < bomber_build_cooldown:
+			return False
+		if not self.colony.planet.oilPumps or len(self.colony.planet.oilPumps) < 1:
+			return False
+
+		if self.colony.colonyLevel.value in colony_level_thresholds:
+			max_groups = colony_level_thresholds[self.colony.colonyLevel.value].get("max_fleet_groups", 1)
+			if self.colony.colonyFleet:
+				total_fleets = len([f for f in self.colony.colonyFleet if f.type in ["Flanker", "Fighter", "Bomber", "Scout"]])
+				if total_fleets >= max_groups:
+					return False
+		
+		resources = self.colony.planet.planetNaturalResources
+		if resources.steelStorage < bomber_steel_cost:
+			return False
+		if resources.oilStorage < bomber_oil_cost:
+			return False
+		
+		return True
+
+	def build_bomber_group(self) -> Optional[Fleet]:
+		if not self.can_build_bomber_group():
+			return None
+		
+		resources = self.colony.planet.planetNaturalResources
+		resources.steelStorage -= bomber_steel_cost
+		resources.oilStorage -= bomber_oil_cost
+		
+		base_pos = self._get_planet_base_position()
+		planet_pos = self.colony.planet.position
+		
+		dx = base_pos.x - planet_pos.x
+		dy = base_pos.y - planet_pos.y
+		dz = base_pos.z - planet_pos.z
+		dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+		
+		if dist > 0.001:
+			nx, ny, nz = dx/dist, dy/dist, dz/dist
+		else:
+			nx, ny, nz = 0, 1, 0
+            
+		spawn_altitude = 3.0
+		fleet_spawn_pos = Vector3(
+			x=base_pos.x + nx * spawn_altitude,
+			y=base_pos.y + ny * spawn_altitude,
+			z=base_pos.z + nz * spawn_altitude
+		)
+		
+		if self.colony.colonyFleet is None:
+			self.colony.colonyFleet = []
+		
+		group_id = str(uuid.uuid4())[:8]
+		
+		fleet_stats = _CONFIG.get("fleet_stats", {}).get("Bomber", {})
+		fleet_speed = fleet_stats.get("speed", 4.0)
+		fleet_max_hp = fleet_stats.get("maxHP", 150.0)
+		fleet_damage = fleet_stats.get("damage", 30.0)
+		
+		fleet = Fleet(
+			id=f"bomber_{group_id}",
+			type="Bomber",
+			label=f"{self.colony.name} Bombers",
+			count=bomber_group_size,
+			position=Vector3(x=fleet_spawn_pos.x, y=fleet_spawn_pos.y, z=fleet_spawn_pos.z),
+			velocity=Vector3(x=0.0, y=0.0, z=0.0),
+			state="Idle",
+			tactic="Offensive",
+			hpPool=fleet_max_hp * bomber_group_size,
+			maxHP=fleet_max_hp,
+			damage=fleet_damage,
+			speed=fleet_speed,
+			homePosition=Vector3(x=fleet_spawn_pos.x, y=fleet_spawn_pos.y, z=fleet_spawn_pos.z)
+		)
+		
+		self._fleet_patrol_cooldowns[fleet.id] = 0
+		self.colony.colonyFleet.append(fleet)
+		self.last_bomber_build_time = time.time()
+		
+		if self.attack_target_colony_id:
+			for target_col in (self._get_all_colonies_cache() or []):
+				if target_col.colony.id == self.attack_target_colony_id:
+					self._add_fleet_to_attack(fleet, target_col)
+					break
+		
+		self._mark_changed()
+		self._add_action_event(f"built a Bomber group ({bomber_group_size} ships)", "build")
+		return fleet
+
+	def can_build_scout_group(self) -> bool:
+		"""Check if the colony can build a scout group."""
+		if not self.can_build_fleet_type("Scout"):
+			return False
+		if time.time() - self.last_scout_build_time < scout_build_cooldown:
+			return False
+		if not self.colony.planet.oilPumps or len(self.colony.planet.oilPumps) < 1:
+			return False
+
+		if self.colony.colonyLevel.value in colony_level_thresholds:
+			max_groups = colony_level_thresholds[self.colony.colonyLevel.value].get("max_fleet_groups", 1)
+			if self.colony.colonyFleet:
+				total_fleets = len([f for f in self.colony.colonyFleet if f.type in ["Flanker", "Fighter", "Bomber", "Scout"]])
+				if total_fleets >= max_groups:
+					return False
+		
+		resources = self.colony.planet.planetNaturalResources
+		if resources.steelStorage < scout_steel_cost:
+			return False
+		if resources.oilStorage < scout_oil_cost:
+			return False
+		
+		return True
+
+	def build_scout_group(self) -> Optional[Fleet]:
+		if not self.can_build_scout_group():
+			return None
+		
+		resources = self.colony.planet.planetNaturalResources
+		resources.steelStorage -= scout_steel_cost
+		resources.oilStorage -= scout_oil_cost
+		
+		base_pos = self._get_planet_base_position()
+		planet_pos = self.colony.planet.position
+		
+		dx = base_pos.x - planet_pos.x
+		dy = base_pos.y - planet_pos.y
+		dz = base_pos.z - planet_pos.z
+		dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+		
+		if dist > 0.001:
+			nx, ny, nz = dx/dist, dy/dist, dz/dist
+		else:
+			nx, ny, nz = 0, 1, 0
+            
+		spawn_altitude = 3.0
+		fleet_spawn_pos = Vector3(
+			x=base_pos.x + nx * spawn_altitude,
+			y=base_pos.y + ny * spawn_altitude,
+			z=base_pos.z + nz * spawn_altitude
+		)
+		
+		if self.colony.colonyFleet is None:
+			self.colony.colonyFleet = []
+		
+		group_id = str(uuid.uuid4())[:8]
+		
+		fleet_stats = _CONFIG.get("fleet_stats", {}).get("Scout", {})
+		fleet_speed = fleet_stats.get("speed", 8.0)
+		fleet_max_hp = fleet_stats.get("maxHP", 50.0)
+		fleet_damage = fleet_stats.get("damage", 5.0)
+		
+		fleet = Fleet(
+			id=f"scout_{group_id}",
+			type="Scout",
+			label=f"{self.colony.name} Scouts",
+			count=scout_group_size,
+			position=Vector3(x=fleet_spawn_pos.x, y=fleet_spawn_pos.y, z=fleet_spawn_pos.z),
+			velocity=Vector3(x=0.0, y=0.0, z=0.0),
+			state="Idle",
+			tactic="Defensive",
+			hpPool=fleet_max_hp * scout_group_size,
+			maxHP=fleet_max_hp,
+			damage=fleet_damage,
+			speed=fleet_speed,
+			homePosition=Vector3(x=fleet_spawn_pos.x, y=fleet_spawn_pos.y, z=fleet_spawn_pos.z)
+		)
+		
+		self._fleet_patrol_cooldowns[fleet.id] = 0
+		self.colony.colonyFleet.append(fleet)
+		self.last_scout_build_time = time.time()
+		
+		if self.attack_target_colony_id:
+			for target_col in (self._get_all_colonies_cache() or []):
+				if target_col.colony.id == self.attack_target_colony_id:
+					self._add_fleet_to_attack(fleet, target_col)
+					break
+		
+		self._mark_changed()
+		self._add_action_event(f"built a Scout group ({scout_group_size} ships)", "build")
+		return fleet
 
 	def get_unlocked_fleet_types(self) -> List[str]:
 		"""Get the list of fleet types unlocked at the current colony level."""
@@ -1690,7 +2047,7 @@ class Colony:
 					nx, ny, nz = nx/n_len, ny/n_len, nz/n_len
 					
 					# Attack position = Base + Normal * Range
-					attack_range = 15.0
+					attack_range = 12.0
 					final_pos = Vector3(
 						x = target_pos.x + nx * attack_range,
 						y = target_pos.y + ny * attack_range,
@@ -1705,7 +2062,7 @@ class Colony:
 			dz = fleet.position.z - target_pos.z
 			dist = math.sqrt(dx*dx + dy*dy + dz*dz)
 			
-			attack_range = 15.0
+			attack_range = 12.0
 			
 			if dist == 0:
 				direction = Vector3(x=1, y=0, z=0)
@@ -1722,7 +2079,14 @@ class Colony:
 		waypoints = self._generate_path_waypoints(fleet.position, final_pos, all_colonies)
 		
 		fleet.waypoints = waypoints
-		fleet.target = FleetTarget(id=target_id, position=target_pos)
+		# Use elevated target position for Base targets so ships aim at the
+		# visual center of the settlement, not the ground beneath it
+		if target_type == "Base":
+			target_colony = next((c for c in all_colonies if c.colony.id == target_id), None)
+			aim_pos = target_colony._get_base_target_position() if target_colony else target_pos
+		else:
+			aim_pos = target_pos
+		fleet.target = FleetTarget(id=target_id, position=aim_pos)
 		fleet.state = "Moving"
 		self._mark_changed()
 
@@ -1783,7 +2147,7 @@ class Colony:
 		for i in range(num_spots):
 			# Use spherical coordinates with some randomness
 			theta = (i * 2 * math.pi / num_spots) + random.uniform(-0.3, 0.3)  # Horizontal angle
-			phi = random.uniform(math.pi/6, math.pi/3)  # Vertical angle from normal (30-60 degrees)
+			phi = random.uniform(math.pi/12, math.pi/5)  # Vertical angle from normal (15-36 degrees)
 			
 			# Radial distance with some spread
 			radius = attack_parking_spot_distance + random.uniform(-attack_parking_spot_spread, attack_parking_spot_spread)
@@ -1976,8 +2340,9 @@ class Colony:
 		if not parking_spot:
 			return
 		
-		# Get target information
-		target_base_pos = target_colony._get_planet_base_position()
+		# Get target information — use elevated position so ships aim at the
+		# visual center of the settlement, not the ground
+		target_attack_pos = target_colony._get_base_target_position()
 		target_id = target_colony.colony.id
 		
 		# Generate path to parking spot
@@ -1985,7 +2350,7 @@ class Colony:
 		waypoints = self._generate_path_waypoints(fleet.position, parking_spot, all_colonies)
 		
 		fleet.waypoints = waypoints
-		fleet.target = FleetTarget(id=target_id, position=target_base_pos)
+		fleet.target = FleetTarget(id=target_id, position=target_attack_pos)
 		fleet.state = "Moving"
 		self._mark_changed()
 
@@ -2027,15 +2392,14 @@ class Colony:
 				if fleet.isAttacking and fleet.target and fleet.target.id:
 					self._resolve_fleet_combat(fleet, delta_time, all_colonies)
 
-		# 2. Base Defense (if upgraded)
+		# 2. Base Defense (all levels can defend, with varying strength)
 		self.colony.is_fighting = False
 		self.colony.defense_target_id = None
 		self.colony.defense_target_pos = None
 		
 		try:
-			current_index = COLONY_LEVEL_ORDER.index(self.colony.colonyLevel)
-			if current_index >= 1: # Settlement or higher
-				self._resolve_base_defense(delta_time, all_colonies)
+			COLONY_LEVEL_ORDER.index(self.colony.colonyLevel)
+			self._resolve_base_defense(delta_time, all_colonies)
 		except ValueError:
 			pass
 
@@ -2074,7 +2438,12 @@ class Colony:
 			self._mark_changed()
 			return
 
-		fleet.target.position = target_pos
+		# Use elevated target position for Base targets so ships aim at the
+		# visual center of the settlement, not the ground beneath it
+		if target_type == "Base":
+			fleet.target.position = target_colony._get_base_target_position()
+		else:
+			fleet.target.position = target_pos
 
 		dist = self._distance_v3(fleet.position, target_pos)
 		if dist > 30.0:
@@ -2154,14 +2523,16 @@ class Colony:
 
 	def _take_over_colony(self, victim: 'Colony'):
 		"""Handle taking over a defeated colony."""
+		victim_name = victim.colony.name  # Store original name for action event
 		victim.colony.owner_id = self.colony.owner_id
 		victim.colony.hp = victim.colony.max_hp
 		victim.colony.color = self.colony.color
+		victim.colony.name = self.colony.name  # Update name to match conqueror
 		victim.colony.colonyFleet = []
 		
 		victim._mark_changed()
 		victim._add_action_event(f"Conquered by {self.colony.name}!", "defeat")
-		self._add_action_event(f"Conquered {victim.colony.name}!", "victory")
+		self._add_action_event(f"Conquered {victim_name}!", "victory")
 
 	def _resolve_base_defense(self, delta_time: float, all_colonies: List['Colony']):
 		"""Base defense logic: Shoot closest enemy."""
@@ -2198,8 +2569,10 @@ class Colony:
 			self._mark_changed()
 
 			current_hp = float(closest_enemy.hpPool) if closest_enemy.hpPool is not None else 100.0
-			# Reduced damage from 20.0 to 12.0
-			closest_enemy.hpPool = current_hp - (12.0 * delta_time)
+			# Per-level defense DPS from config
+			level_key = self.colony.colonyLevel.value
+			defense_dps = colony_defense_stats.get(level_key, {}).get("defense_dps", 5.0)
+			closest_enemy.hpPool = current_hp - (defense_dps * delta_time)
 			if closest_enemy.hpPool <= 0:
 				# Log for debugging
 				print(f"Base defense destroyed fleet {closest_enemy.id}. Colony {closest_colony.colony.name} had {len(closest_colony.colony.colonyFleet) if closest_colony.colony.colonyFleet else 0} fleets.")

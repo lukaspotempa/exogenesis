@@ -85,7 +85,7 @@ class FleetTarget(BaseModel):
 
 class Fleet(BaseModel):
     id: str
-    type: Literal["Attacker", "Flanker", "Fighter", "Bomber"]
+    type: Literal["Attacker", "Flanker", "Fighter", "Bomber", "Scout"]
     label: Optional[str] = None
     count: Optional[int] = 1
     position: Vector3

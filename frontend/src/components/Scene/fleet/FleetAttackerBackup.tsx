@@ -1,4 +1,3 @@
-import { useGLTF } from '@react-three/drei';
 import type { Fleet } from '../../../types/Types';
 import { useRef, useEffect, type RefObject } from 'react';
 import * as THREE from 'three';

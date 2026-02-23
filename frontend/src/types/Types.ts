@@ -56,7 +56,7 @@ export interface SteelFactory {
 
 export interface Fleet {
     id: string;
-    type: 'Attacker' | 'Flanker' | 'Fighter' | 'Bomber';
+    type: 'Attacker' | 'Flanker' | 'Fighter' | 'Bomber' | 'Scout';
     label?: string;
     count?: number;
     position: { x: number, y: number, z: number };
