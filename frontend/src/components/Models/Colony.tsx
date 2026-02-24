@@ -10,6 +10,7 @@ import { BaseFlag } from './structures/BaseFlag';
 import { OilPump } from './structures/OilPump';
 import { SteelFactory } from './structures/SteelFactory';
 import { BaseDefenseSystem } from './structures/BaseDefenseSystem';
+import { StarportHub } from './structures/StarportHub';
 import { FleetExplosion } from './effects/FleetExplosion';
 import { registerFlagPosition, getFlagPosition, unregisterFlagPosition } from '../../store/flagPositionRegistry';
 
@@ -19,14 +20,14 @@ const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyCo
   'Settlement': ColonySettlement,
   'Township': ColonyMetropolis,
   'Metropolis': ColonyMetropolis,
-  'Starport Hub': ColonyMetropolis,
+  'Starport Hub': StarportHub,
 };
 
 const HEIGHT_OFFSET: Record<string, number> = {
   'Colony': -0.03,
   'Settlement': -0.05,
   'Township': 0.35,
-  'Metropolis': 0.35,
+  'Metropolis': -0.15,
   'Starport Hub': 0.35
 };
 

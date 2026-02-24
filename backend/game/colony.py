@@ -133,6 +133,10 @@ class Colony:
 		self._fleet_parking_spots: Dict[str, Vector3] = {}  # fleet_id -> assigned parking spot position
 		self._all_colonies_cache: Optional[List['Colony']] = None  # Temporary cache for all colonies
 
+		# Third-party attack target-switch cooldown (prevents infinite switching)
+		self.last_target_switch_time = 0.0
+		self.target_switch_cooldown = 30.0  # seconds
+
 	def to_dict(self):
 		return self.colony.dict()
 
@@ -221,6 +225,11 @@ class Colony:
 		# Cache all colonies for fleet spawning
 		self._all_colonies_cache = all_colonies
 		
+		# Hive mind: owned (non-master) colonies sync their attack
+		# target with the master colony instead of deciding on their own.
+		if all_colonies:
+			self._sync_with_hive(all_colonies)
+
 		# Colony-level attack decision making
 		if all_colonies:
 			# Check if we should initiate a new attack
@@ -245,6 +254,18 @@ class Colony:
 					self.attack_target_colony_id = None
 					self._fleet_parking_spots = {}
 		
+		# Third-party attack detection: if we are attacking one colony
+		# and a DIFFERENT colony attacks us, switch to defend.
+		if all_colonies and self.attack_target_colony_id:
+			if time.time() - self.last_target_switch_time >= self.target_switch_cooldown:
+				third_party_id = self._check_for_third_party_attack(all_colonies)
+				if third_party_id:
+					for tc in all_colonies:
+						if tc.colony.id == third_party_id:
+							self._order_colony_wide_attack(tc, all_colonies)
+							self.last_target_switch_time = time.time()
+							break
+
 		# Handle combat behavior first
 		if all_colonies:
 			self.update_combat(delta_time, all_colonies)
@@ -2216,6 +2237,11 @@ class Colony:
 		# Pacifist colonies never initiate attacks
 		if self.colony.trait == ColonyTrait.Pacifist.value:
 			return False
+
+		# Non-master colonies don't initiate attacks independently;
+		# they follow the master's decisions via _sync_with_hive().
+		if self.colony.owner_id != self.colony.id:
+			return False
 		
 		# Must have at least one fleet
 		if not self.colony.colonyFleet or len(self.colony.colonyFleet) == 0:
@@ -2239,18 +2265,43 @@ class Colony:
 		if not has_enemies:
 			return False
 		
-		# Trait-based decision
+		# Always update the decision time so checks are properly spaced,
+		# regardless of whether the roll succeeds or fails.
+		self.attack_decision_time = current_time
+
+		# Trait-based decision — low probabilities per tick so colonies
+		# don't attack the moment they build a fleet.
 		if self.colony.trait == ColonyTrait.Aggressive.value:
-			# Aggressive colonies attack frequently
-			return random.random() < 0.7
+			return random.random() < 0.05   # 5 % per eligible tick
 		elif self.colony.trait == ColonyTrait.Defensive.value:
-			# Defensive colonies attack less frequently
-			return random.random() < 0.3
+			return random.random() < 0.02   # 2 %
 		elif self.colony.trait == ColonyTrait.Economic.value:
-			# Economic colonies rarely attack
-			return random.random() < 0.1
+			return random.random() < 0.005  # 0.5 %
 		
 		return False
+
+	def _check_for_third_party_attack(self, all_colonies: List['Colony']) -> Optional[str]:
+		"""Detect if a colony OTHER than our current target is attacking our base.
+
+		Returns the attacking colony's ID so we can switch focus, or None.
+		"""
+		my_owner = self.colony.owner_id
+
+		for other in all_colonies:
+			if other.colony.id == self.colony.id:
+				continue
+			other_owner = other.colony.owner_id if other.colony.owner_id else other.colony.id
+			if other_owner == my_owner:
+				continue
+			# Skip our current attack target — that's not a "third party"
+			if other.colony.id == self.attack_target_colony_id:
+				continue
+			# Check if any of their fleets are attacking our base
+			if other.colony.colonyFleet:
+				for f in other.colony.colonyFleet:
+					if f.isAttacking and f.target and f.target.id == self.colony.id:
+						return other.colony.id
+		return None
 
 	def _select_attack_target(self, all_colonies: List['Colony']) -> Optional['Colony']:
 		"""Select an enemy colony to attack."""
@@ -2372,6 +2423,49 @@ class Colony:
 		# Add each reinforcement to the attack
 		for fleet in new_reinforcements:
 			self._add_fleet_to_attack(fleet, target_colony)
+
+	# ------------------------------------------------------------------
+	# Hive-mind synchronisation
+	# ------------------------------------------------------------------
+
+	def _sync_with_hive(self, all_colonies: List['Colony']):
+		"""Synchronise this colony's military decisions with its master.
+
+		Non-master colonies (owner_id != id) do not make independent attack
+		decisions.  Instead they mirror whatever target the master colony is
+		currently engaged with and reinforce with their own fleets.
+		"""
+		# Master colonies lead — nothing to sync.
+		if self.colony.owner_id == self.colony.id:
+			return
+
+		# Find the master colony.
+		master: Optional['Colony'] = None
+		for c in all_colonies:
+			if c.colony.id == self.colony.owner_id:
+				master = c
+				break
+
+		if master is None:
+			return
+
+		master_target = master.attack_target_colony_id
+
+		if master_target:
+			# Master is attacking — join the campaign if we haven't already.
+			if self.attack_target_colony_id != master_target:
+				self.attack_target_colony_id = master_target
+				self._fleet_parking_spots = {}
+			# Dispatch any available fleets toward the target.
+			for tc in all_colonies:
+				if tc.colony.id == master_target:
+					self._reinforce_attack(tc, all_colonies)
+					break
+		else:
+			# Master is idle — stand down if we had an ongoing attack.
+			if self.attack_target_colony_id:
+				self.attack_target_colony_id = None
+				self._fleet_parking_spots = {}
 
 	def _get_all_colonies_cache(self) -> Optional[List['Colony']]:
 		"""Get cached list of all colonies (for use in spawning callbacks)."""
@@ -2522,17 +2616,32 @@ class Colony:
 				self._mark_changed()
 
 	def _take_over_colony(self, victim: 'Colony'):
-		"""Handle taking over a defeated colony."""
-		victim_name = victim.colony.name  # Store original name for action event
+		"""Handle taking over a defeated colony.
+
+		The victim becomes part of the conqueror's hive: same owner, colour,
+		name, and trait.  Its attack state is cleared so _sync_with_hive()
+		will pick up the master's current campaign on the next tick.
+		"""
+		conqueror_name = self.colony.name  # Capture before any mutations
+
+		# Fire the defeat event BEFORE renaming the victim so the event's
+		# colonyName still reflects the original colony name, not the
+		# conqueror's name that is about to overwrite it.
+		victim._add_action_event(f"Conquered by {conqueror_name}!", "defeat")
+
 		victim.colony.owner_id = self.colony.owner_id
 		victim.colony.hp = victim.colony.max_hp
 		victim.colony.color = self.colony.color
-		victim.colony.name = self.colony.name  # Update name to match conqueror
+		victim.colony.name = conqueror_name      # Update name to match conqueror
+		victim.colony.trait = self.colony.trait  # Inherit conqueror's trait (hive mind)
 		victim.colony.colonyFleet = []
-		
+
+		# Clear the victim's independent attack state so the hive sync
+		# can take over on the next tick.
+		victim.attack_target_colony_id = None
+		victim._fleet_parking_spots = {}
+
 		victim._mark_changed()
-		victim._add_action_event(f"Conquered by {self.colony.name}!", "defeat")
-		self._add_action_event(f"Conquered {victim_name}!", "victory")
 
 	def _resolve_base_defense(self, delta_time: float, all_colonies: List['Colony']):
 		"""Base defense logic: Shoot closest enemy."""
@@ -2588,6 +2697,7 @@ class Colony:
 				self.colony.defense_target_pos = None
 				self._mark_changed()
 
+	# checks whether line of sight is given
 	def _has_line_of_sight(self, p1: Vector3, p2: Vector3, all_colonies: List['Colony']) -> bool:
 		dx = p2.x - p1.x
 		dy = p2.y - p1.y
