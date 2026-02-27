@@ -147,10 +147,10 @@ function App() {
   }, [activeColony]);
 
   useEffect(() => {
-    const URL = import.meta.env.VITE_WEBSOCKET_URL || "localhost:8000/ws";
+    const URL = import.meta.env.VITE_WEBSOCKET_URL || "ws://localhost:8000/ws";
     console.log('WebSocket URL:', URL);
     if (!URL) return;
-    const socket = new WebSocket("ws://" + URL);
+    const socket = new WebSocket(URL);
 
     socket.onmessage = (ev: MessageEvent) => {
       try {
