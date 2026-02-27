@@ -5,7 +5,22 @@ import asyncio
 from .colony import Colony
 import json
 
-colony_names = ["Aurora", "Mundane", "Mohawk", "Mohawk"]
+PLANET_NAME_POOL = [
+    "Aurora", "Mundane", "Mohawk", "Vega", "Solaris", "Erebus", "Nyx", "Hyperion",
+    "Elysium", "Tartarus", "Zephyr", "Helios", "Callisto", "Oberon", "Titania",
+    "Ariel", "Umbriel", "Triton", "Proteus", "Larissa", "Galatea", "Despina",
+    "Thalassa", "Naiad", "Nereid", "Ophelia", "Bianca", "Cressida", "Desdemona",
+    "Juliet", "Portia", "Rosalind", "Belinda", "Puck", "Cordelia", "Perdita",
+    "Mab", "Cupid", "Setebos", "Sycorax", "Prospero", "Stephano", "Trinculo",
+    "Caliban", "Ferdinand", "Enceladus", "Mimas", "Rhea", "Dione", "Tethys",
+    "Phoebe", "Janus", "Epimetheus", "Helene", "Telesto", "Calypso", "Kiviuq",
+    "Ijiraq", "Paaliaq", "Skathi", "Albiorix", "Bebhionn", "Erriapus", "Siarnaq",
+    "Themisto", "Metis", "Adrastea", "Amalthea", "Thebe", "Io", "Ganymede",
+    "Himalia", "Elara", "Pasiphae", "Sinope", "Lysithea", "Carme", "Ananke",
+    "Leda", "Thebe", "Aether", "Kronos", "Ares", "Hermes", "Athena", "Hestia",
+    "Demeter", "Persephone", "Hades", "Poseidon", "Aphrodite", "Nemesis", "Selene",
+    "Eos", "Iris", "Moira", "Tyche", "Phoebe", "Circe", "Siren", "Pandora",
+]
 
 class GameManager:
     """Manages colonies in-memory."""
@@ -22,7 +37,7 @@ class GameManager:
         """Set the connection manager for broadcasting updates."""
         self._connection_manager = connection_manager
 
-    def initialise_game(self, count: int = 3) -> List[dict]:
+    def initialise_game(self, count: int = 15) -> List[dict]:
         created = []
         default_data = []
         with open('config.json') as f:
@@ -32,10 +47,14 @@ class GameManager:
         if default_data.get("use_debug_scenario", False):
             print("Initializing Debug Scenario: 2 planets 150 units apart.")
             return self._create_debug_scenario()
-            
-        for i in range(count):
+
+        used_names = {c.colony.name for c in self.colonies}
+        available_names = [n for n in PLANET_NAME_POOL if n not in used_names]
+        chosen_names = random.sample(available_names, min(count, len(available_names)))
+
+        for name in chosen_names:
             payload = {
-                "name": colony_names[len(self.colonies)],
+                "name": name,
                 "residents": default_data["defaultResidents"],
                 "color": f"#{random.randint(0, 0xFFFFFF):06x}",
                 "colonyLevel": "Colony",
