@@ -1,5 +1,6 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.websockets import WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 import json
 from game.connection import ConnectionManager
 from game.manager import GameManager
@@ -29,6 +30,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://lukaspotempa.de"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/")
 async def root():
@@ -46,6 +55,8 @@ def api_create_colony(payload: dict):
 
 
 @app.websocket("/ws")
+@app.websocket("/ws/")
+@app.websocket("/")
 async def websocket_endpoint(websocket: WebSocket):
 
     await connection_manager.connect(websocket)
