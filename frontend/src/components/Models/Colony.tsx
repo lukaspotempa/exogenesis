@@ -26,7 +26,7 @@ const COLONY_BASE_STRUCTURES: Record<ColonyLevel, React.ComponentType<{ colonyCo
 const HEIGHT_OFFSET: Record<string, number> = {
   'Colony': -0.03,
   'Settlement': -0.05,
-  'Township': 0.35,
+  'Township': -0.15,
   'Metropolis': -0.15,
   'Starport Hub': 0.35
 };
