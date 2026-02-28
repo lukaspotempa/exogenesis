@@ -614,15 +614,11 @@ class Colony:
 		# Check building capacity constraint
 		max_capacity = self.calculate_building_capacity()
 		
-		# If we're at or above capacity, no growth
-		if self.colony.residents >= max_capacity and max_capacity > 0:
+		# If we're at or above capacity
+		if max_capacity > 0 and self.colony.residents >= max_capacity:
 			growth = 0
 		
 		if growth > 0:
-			if max_capacity > 0 and self.colony.residents > max_capacity * 0.9:
-				capacity_factor = (max_capacity - self.colony.residents) / (max_capacity * 0.1)
-				growth *= max(0, capacity_factor)
-			
 			self.change_residents(int(growth))
 		
 		self.last_residents_update = time.time()
