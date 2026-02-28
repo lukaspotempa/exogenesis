@@ -2,11 +2,11 @@
     "use_debug_scenario": false,
     "defaultResidents": 100,
     "resident_update_interval": 5,
-    "colony_min_distance": 40,
+    "colony_min_distance": 80,
     "min_building_distance": 12.0,
     "planet_model_radius": 15.0,
     "residents_base_growth": 10,
-    "space_generation_range": {"min": -100, "max": 100},
+    "space_generation_range": {"min": -200, "max": 200},
     
     "ideal_temperature": 15.0,
     "temperature_tolerance": 10.0,
