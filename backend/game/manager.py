@@ -23,6 +23,9 @@ PLANET_NAME_POOL = [
     "Eos", "Iris", "Moira", "Tyche", "Phoebe", "Circe", "Siren", "Pandora",
 ]
 
+# Maximum game duration in seconds (1 hour)
+MAX_GAME_DURATION: float = 3600.0
+
 class GameManager:
     """Manages colonies in-memory."""
 
@@ -35,12 +38,14 @@ class GameManager:
         self.action_history: List[dict] = []  # Store global action history
         self._game_over_announced: bool = False
         self._restart_task: Optional[asyncio.Task] = None
+        self._game_start_time: float = 0.0
 
     def set_connection_manager(self, connection_manager):
         """Set the connection manager for broadcasting updates."""
         self._connection_manager = connection_manager
 
     def initialise_game(self, count: int = 15) -> List[dict]:
+        self._game_start_time = time.time()
         created = []
         default_data = []
         with open('config.json') as f:
@@ -198,6 +203,9 @@ class GameManager:
         # Check Win Condition
         self._check_win_condition(all_action_events)
 
+        # Check timeout failsafe (1-hour max game length)
+        self._check_timeout()
+
         # Update global history
         if all_action_events:
             self.action_history.extend(all_action_events)
@@ -212,6 +220,33 @@ class GameManager:
         # Broadcast action events to all connected clients
         if all_action_events and self._connection_manager:
             asyncio.create_task(self._broadcast_action_events(all_action_events))
+
+    def _check_timeout(self) -> None:
+        """End the game if it has been running for longer than MAX_GAME_DURATION."""
+        if self._game_over_announced or self._game_start_time == 0.0:
+            return
+        if time.time() - self._game_start_time < MAX_GAME_DURATION:
+            return
+
+        self._game_over_announced = True
+        restart_at = time.time() + 60  # 60-second cooldown before restart
+
+        game_over_msg = {
+            "type": "game_over",
+            "winner": {
+                "id": "timeout",
+                "name": "Time's Up",
+                "color": "#aaaaaa",
+            },
+            "actionHistory": list(self.action_history),
+            "restartAt": restart_at,
+        }
+
+        if self._connection_manager:
+            asyncio.create_task(self._connection_manager.broadcast_json(game_over_msg))
+
+        # Schedule game reset after cooldown
+        self._restart_task = asyncio.create_task(self._schedule_restart(60))
 
     def _check_win_condition(self, events_list: List[dict]):
         """Check if one colony has taken over all others."""

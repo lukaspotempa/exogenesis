@@ -206,3 +206,195 @@
     color: #fff;
     letter-spacing: 4px;
 }
+
+/* ── Tutorial Overlay ───────────────────────────────────────────────────── */
+.tutorial-overlay {
+    position: fixed;
+    z-index: 100000;
+    pointer-events: none;
+}
+
+/* Prompt (centered modal) */
+.tutorial-prompt {
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.70);
+    backdrop-filter: blur(8px);
+    pointer-events: auto;
+}
+
+.tutorial-prompt-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 36px 40px;
+    width: min(90vw, 440px);
+    background: rgba(10, 12, 24, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    box-shadow: 0 0 60px rgba(80, 140, 255, 0.2);
+    text-align: center;
+}
+
+.tutorial-prompt-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 1px;
+}
+
+.tutorial-prompt-text {
+    margin: 0;
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.75);
+    line-height: 1.5;
+}
+
+.tutorial-prompt-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+/* Step banner (top center) */
+.tutorial-step-banner {
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(96vw, 680px);
+    padding-top: 12px;
+    pointer-events: none;
+}
+
+.tutorial-step-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 20px;
+    background: rgba(10, 12, 24, 0.92);
+    border: 1px solid rgba(100, 160, 255, 0.25);
+    border-radius: 12px;
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(100, 160, 255, 0.08);
+    pointer-events: auto;
+}
+
+.tutorial-step-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.tutorial-step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tutorial-step-counter {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(100, 160, 255, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    white-space: nowrap;
+}
+
+.tutorial-step-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.tutorial-step-desc {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.4;
+}
+
+.tutorial-step-hint {
+    margin: 0;
+    font-size: 11px;
+    color: rgba(100, 200, 255, 0.65);
+    font-style: italic;
+}
+
+.tutorial-step-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Done banner */
+.tutorial-done-banner {
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(96vw, 400px);
+    padding-top: 12px;
+    display: flex;
+    justify-content: center;
+}
+
+.tutorial-done-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 24px;
+    background: rgba(20, 200, 100, 0.18);
+    border: 1px solid rgba(20, 200, 100, 0.35);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 0 24px rgba(20, 200, 100, 0.15);
+}
+
+.tutorial-done-icon {
+    font-size: 18px;
+    color: #4ade80;
+}
+
+/* Shared button styles */
+.tutorial-btn {
+    padding: 7px 18px;
+    border: none;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+    white-space: nowrap;
+}
+
+.tutorial-btn-primary {
+    background: #3b82f6;
+    color: #fff;
+}
+.tutorial-btn-primary:hover {
+    background: #2563eb;
+}
+
+.tutorial-btn-secondary {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.85);
+}
+.tutorial-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.tutorial-btn-danger {
+    background: rgba(220, 60, 60, 0.25);
+    color: rgba(255, 130, 130, 0.9);
+}
+.tutorial-btn-danger:hover {
+    background: rgba(220, 60, 60, 0.4);
+}

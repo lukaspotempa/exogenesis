@@ -8,6 +8,7 @@ import ColonyList from './components/UI/ColonyList'
 import PlanetDetails from './components/UI/PlanetDetails'
 import ActionLog from './components/UI/ActionLog'
 import VictoryScreen from './components/UI/VictoryScreen'
+import TutorialOverlay from './components/UI/TutorialOverlay'
 import { Suspense, useCallback, useEffect, useState, useRef } from 'react'
 import * as THREE from 'three'
 import { coloniesStore } from './store/coloniesStore'
@@ -263,6 +264,7 @@ function App() {
     setActiveFleetId(null);
     setCamPosition([colony.planet.position.x, colony.planet.position.y, colony.planet.position.z + 30]);
     setCamLookAt([colony.planet.position.x, colony.planet.position.y, colony.planet.position.z]);
+    window.dispatchEvent(new CustomEvent('planetSelected'));
   }, []);
 
   const handleSelectFleet = useCallback((fleet: Fleet) => {
@@ -296,6 +298,7 @@ function App() {
             <ActionLog events={actionEvents} />
           </div>
         </div>
+        <TutorialOverlay />
         {gameOver && (
           <VictoryScreen gameOver={gameOver} onRestart={handleGameRestart} />
         )}

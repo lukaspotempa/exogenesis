@@ -74,13 +74,19 @@ export default function VictoryScreen({ gameOver, onRestart }: Props) {
       <div className="victory-panel">
         {/* Winner announcement */}
         <div className="victory-header">
-          <span className="victory-trophy"></span>
-          <h1 className="victory-title">Victory</h1>
+          <span className="victory-trophy">{gameOver.winner.id === 'timeout' ? '⏰' : '🏆'}</span>
+          <h1 className="victory-title">{gameOver.winner.id === 'timeout' ? 'Time\'s Up' : 'Victory'}</h1>
           <p className="victory-subtitle">
-            <span className="victory-winner-name" style={{ color: gameOver.winner.color }}>
-              {gameOver.winner.name}
-            </span>{' '}
-            has conquered the galaxy!
+            {gameOver.winner.id === 'timeout' ? (
+              <span style={{ color: '#aaaaaa' }}>The galaxy remains divided — no winner emerged.</span>
+            ) : (
+              <>
+                <span className="victory-winner-name" style={{ color: gameOver.winner.color }}>
+                  {gameOver.winner.name}
+                </span>{' '}
+                has conquered the galaxy!
+              </>
+            )}
           </p>
         </div>
 
