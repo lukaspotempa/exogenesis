@@ -77,6 +77,7 @@ export default function ColonyList({ colonies, activeColony, setActiveColony, on
               <th className="px-3 py-2">#</th>
               <th className="px-3 py-2">Color</th>
               <th className="px-3 py-2">Colony Name</th>
+              <th className="px-3 py-2">Level</th>
               <th className="px-3 py-2">Residents</th>
             </tr>
           </thead>
@@ -102,6 +103,7 @@ export default function ColonyList({ colonies, activeColony, setActiveColony, on
                     />
                   </td>
                   <td className="px-3 py-2 align-middle truncate">{colony.name}</td>
+                  <td className="px-3 py-2 align-middle whitespace-nowrap text-white/60 text-xs">{colony.colonyLevel}</td>
                   <td className="px-3 py-2 align-middle">{colony.residents.toLocaleString()}</td>
                 </tr>
               )

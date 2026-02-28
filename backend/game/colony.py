@@ -133,7 +133,7 @@ class Colony:
 		self._fleet_parking_spots: Dict[str, Vector3] = {}  # fleet_id -> assigned parking spot position
 		self._all_colonies_cache: Optional[List['Colony']] = None  # Temporary cache for all colonies
 
-		# Third-party attack target-switch cooldown (prevents infinite switching)
+		# Third-party attack target-switch cooldown
 		self.last_target_switch_time = 0.0
 		self.target_switch_cooldown = 30.0  # seconds
 
@@ -172,7 +172,6 @@ class Colony:
 	def _get_random_valid_position(self) -> Optional[Vector2]:
 		"""Try to find a valid position for a new building."""
 		for _ in range(20):  # Try 20 times
-			# Same generation range as original: X: -1 to 1, Y: -50 to 50
 			pos = Vector2(
 				x=float(random.uniform(-1.0, 1.0)), 
 				y=float(random.uniform(-50.0, 50.0))
@@ -192,7 +191,6 @@ class Colony:
 		if not self.colony.colonyFleet:
 			return
 		
-		# Store old list for debugging potential issues
 		old_count = len(self.colony.colonyFleet)
 		
 		# Filter out only the fleet with matching ID
@@ -201,7 +199,6 @@ class Colony:
 		new_count = len(self.colony.colonyFleet)
 		removed_count = old_count - new_count
 		
-		# Defensive check: warn if we removed more than one fleet (shouldn't happen)
 		if removed_count > 1:
 			print(f"WARNING: Removed {removed_count} fleets when trying to remove fleet {fleet_id}")
 		
@@ -224,9 +221,7 @@ class Colony:
 		
 		# Cache all colonies for fleet spawning
 		self._all_colonies_cache = all_colonies
-		
-		# Hive mind: owned (non-master) colonies sync their attack
-		# target with the master colony instead of deciding on their own.
+
 		if all_colonies:
 			self._sync_with_hive(all_colonies)
 
@@ -253,9 +248,7 @@ class Colony:
 				if not target_still_exists:
 					self.attack_target_colony_id = None
 					self._fleet_parking_spots = {}
-		
-		# Third-party attack detection: if we are attacking one colony
-		# and a DIFFERENT colony attacks us, switch to defend.
+
 		if all_colonies and self.attack_target_colony_id:
 			if time.time() - self.last_target_switch_time >= self.target_switch_cooldown:
 				third_party_id = self._check_for_third_party_attack(all_colonies)
@@ -283,7 +276,6 @@ class Colony:
 					self.attack_target_colony_id = None
 					self._fleet_parking_spots = {}
 				else:
-					# Reinforce: Check for newly idle/patrolling fleets that should join the attack
 					for target_col in all_colonies:
 						if target_col.colony.id == self.attack_target_colony_id:
 							self._reinforce_attack(target_col, all_colonies)
@@ -357,8 +349,6 @@ class Colony:
 		if not self.can_build_oil_pump():
 			return None
 		
-		# Validate cooldown (safety check, though usually handled in auto_build)
-		# But since this can be called manually or in a loop, let's update timestamp here
 		self.last_structure_build_time = time.time()
 
 		# Deduct steel cost
@@ -371,15 +361,9 @@ class Colony:
 		# Find a valid position
 		position = self._get_random_valid_position()
 		if position is None:
-			# Could not find a valid position (too crowded)
-			# Even if we can afford it, we can't build it
-			# Refund cost if we deducted it? Or safer to check position before deducting
-			# Let's revert the cost deduction
 			self.colony.planet.planetNaturalResources.steelStorage += oil_pump_steel_cost
 			return None
 
-		# Create oil pump at validated position
-		# Production rate is based on planet's natural oil generation rate
 		pump = OilPump(
 			id=str(self._next_pump_id),
 			position=position,
@@ -455,17 +439,11 @@ class Colony:
 		# Find a valid position
 		position = self._get_random_valid_position()
 		if position is None:
-			# Could not find a valid position (too crowded)
-			# Revert cost
 			self.colony.planet.planetNaturalResources.oilStorage += steel_factory_oil_cost
 			return None
 
-		# Create steel factory at validated position
-		# Production rate is based on planet's natural steel generation rate
 		factory = SteelFactory(
 			id=str(self._next_factory_id),
-			# Use the same positioning logic as oil pumps or vary it?
-			# Oil pumps use: position=Vector2(x=float(random.uniform(-1.0, 1.0)), y=float(random.uniform(-50.0, 50.0)))
 			position=position,
 			production=self.colony.planet.planetNaturalResources.steel
 		)
@@ -516,11 +494,6 @@ class Colony:
 		uy = math.sin(latitude)
 		uz = math.cos(latitude) * math.sin(longitude)
 		
-		# Apply Planet Rotation (Euler XYZ)
-		# We need to rotate this vector by rot.x, rot.y, rot.z
-		# Note: Frontend renders using raycast with unrotated direction vector, 
-		# so we should NOT apply rotation here to match visual position.
-		# Ideally both should support rotation, but for now we match frontend.
 		x3 = ux
 		y3 = uy
 		z3 = uz
@@ -563,9 +536,7 @@ class Colony:
 			nx, ny, nz = nx/n_len, ny/n_len, nz/n_len
 		else:
 			nx, ny, nz = 0, 1, 0
-		
-		# Scale the height offset so it matches the visual flag height on any
-		# planet size (structures live inside the scaled planet group)
+
 		scaled_height = base_target_height * self.colony.planet.scale
 		
 		return Vector3(
@@ -604,9 +575,6 @@ class Colony:
 		if water_generation <= 0:
 			return 0.1  # Minimum multiplier with no water generation
 		
-		# Scale water multiplier based on generation rate
-		# Typical water generation is 0.0 to 2.0
-		# Scale from 0.1 at 0 water to 2.5 at 2.0+ water
 		max_water_generation = 2.0
 		min_multiplier = 0.1
 		max_multiplier = 2.5
@@ -614,7 +582,6 @@ class Colony:
 		if water_generation >= max_water_generation:
 			return max_multiplier
 		
-		# Linear scaling from min_multiplier to max_multiplier
 		scaled_factor = min_multiplier + (water_generation / max_water_generation) * (max_multiplier - min_multiplier)
 		return min(scaled_factor, max_multiplier)
 
@@ -633,8 +600,6 @@ class Colony:
 
 	def consume_resources(self):
 		"""Consume resources based on current population."""
-		# Water is no longer consumed - it only acts as a growth multiplier
-		# Future: Add consumption for other resources if needed
 		pass
 
 	def increase_residents(self):
@@ -653,9 +618,7 @@ class Colony:
 		if self.colony.residents >= max_capacity and max_capacity > 0:
 			growth = 0
 		
-		# Apply growth (can be negative if conditions are terrible)
 		if growth > 0:
-			# If close to capacity, reduce growth
 			if max_capacity > 0 and self.colony.residents > max_capacity * 0.9:
 				capacity_factor = (max_capacity - self.colony.residents) / (max_capacity * 0.1)
 				growth *= max(0, capacity_factor)
@@ -704,7 +667,6 @@ class Colony:
 			return
 		
 		if self.can_upgrade_to_level(next_level):
-			old_level = self.colony.colonyLevel
 			self.colony.colonyLevel = next_level
 			self._mark_changed()
 			
@@ -735,12 +697,10 @@ class Colony:
 	
 	def auto_build_structures(self):
 		"""Automatically build structures based on colony needs, resources, and trait."""
-		# Check global build cooldown (prevent instant spam)
-		# Allow at least 2 seconds between builds
 		if time.time() - self.last_structure_build_time < 2.0:
 			return
 			
-		# Add "noise" - 30% chance to do nothing this tick even if ready
+		# Add "noise" - 30% chance to do nothing this tick
 		if random.random() < 0.3:
 			return
 
@@ -891,24 +851,17 @@ class Colony:
 		All positions and waypoints are in WORLD SPACE.
 		Backend calculates velocity toward waypoint.
 		"""
-		# Update actual position based on velocity from previous tick
-		# This makes the backend authoritative on position
+
 		if fleet.velocity.x != 0 or fleet.velocity.y != 0 or fleet.velocity.z != 0:
 			# Predict next position
 			next_x = fleet.position.x + fleet.velocity.x * delta_time
 			next_y = fleet.position.y + fleet.velocity.y * delta_time
 			next_z = fleet.position.z + fleet.velocity.z * delta_time
 			
-			# Orbit Constraint Strategy:
-			# 1. Patrol/Idle: Strict constraint (stick to shell)
-			# 2. Attack (Moving remote): Min-radius constraint (don't clip planet)
 			use_min_radius = False
 			if fleet.state == "Moving" and fleet.target and fleet.target.id:
 				use_min_radius = True
 			
-			# Global Planet Collision Avoidance (Clip Check)
-			# If we are moving interstellar, check if we are clipping ANY planet
-			# If so, push us out.
 			if use_min_radius and all_colonies:
 				for c in all_colonies:
 					p_pos = c.colony.planet.position
@@ -996,8 +949,6 @@ class Colony:
 		if distance > 0:
 			speed = fleet.speed if fleet.speed else 5.0
 			
-			# Global Collision Avoidance (Steering)
-			# Calculate direction that avoids planets on the path
 			if all_colonies:
 				steer_dir = self._get_collision_free_direction(fleet.position, target_waypoint, all_colonies)
 				dir_x = steer_dir.x
@@ -1049,17 +1000,11 @@ class Colony:
 		# Update the cooldown timer
 		self._fleet_patrol_cooldowns[fleet.id] = current_time
 		
-		# Note: Awareness checks now handled in _update_fleet_awareness
-		# which is called before this method in update_fleets
-
-		# Pacifist colonies don't move fleets aggressively
 		if self.colony.trait == ColonyTrait.Pacifist.value:
 			# Just stay near home with minimal patrol
 			self._set_patrol_waypoints(fleet, all_colonies, patrol_distance=0.5)
 			return
-		
-		# Other colonies patrol actively but stay near home base
-		# Get patrol radius from config based on fleet type
+
 		fleet_stats = _CONFIG.get("fleet_stats", {}).get(fleet.type, {})
 		patrol_radius = fleet_stats.get("patrol_radius", 1.0)
 		
@@ -1082,15 +1027,6 @@ class Colony:
 		# Cap patrol distance to keep fleets near their home base
 		patrol_distance = min(patrol_distance, 50.0)
 		
-		# Generate waypoints in a roughly circular patrol pattern around HOME position
-		# We need to orient the circle tangent to the planet surface if possible,
-		# or just use a horizontal circle if homePosition is well above the planet.
-		# Given they spawn above the base, "Horizontal" (XZ) might cut through the planet 
-		# if the base is on the side.
-		
-		# Better strategy: Define the "Up" vector as (Home - PlanetCenter).
-		# Then generate a circle in the plane perpendicular to "Up".
-		
 		planet_pos = self.colony.planet.position
 		hx = fleet.homePosition.x - planet_pos.x
 		hy = fleet.homePosition.y - planet_pos.y
@@ -1103,19 +1039,13 @@ class Colony:
 		else:
 			ux, uy, uz = 0, 1, 0
 			
-		# Find arbitrary tangent vectors (Right and Forward) perpendicular to Up
-		# If Up is roughly Y, use X as temp right.
 		if abs(uy) > 0.9:
 			# Up is close to Y axis, use X as reference
 			rx, ry, rz = 1, 0, 0
 		else:
 			# Up is not Y, use Y as reference
 			rx, ry, rz = 0, 1, 0
-			
-		# Right = Cross(Reference, Up)
-		# Rx = Ry*Uz - Rz*Uy
-		# Ry = Rz*Ux - Rx*Uz
-		# Rz = Rx*Uy - Ry*Ux
+
 		t_rx = ry*uz - rz*uy
 		t_ry = rz*ux - rx*uz
 		t_rz = rx*uy - ry*ux
@@ -1158,17 +1088,11 @@ class Colony:
 			wy = center_y + (t_ry * cos_a + fy * sin_a) * patrol_distance
 			wz = center_z + (t_rz * cos_a + fz * sin_a) * patrol_distance
 			
-			# Project this tangent point onto the Safe Orbit Shell
-			# This ensures the waypoint itself is not inside/outside the orbit
 			wp_projected = self._project_position_to_orbit(Vector3(x=wx, y=wy, z=wz))
 			target_points.append(wp_projected)
 
-		# Now generate valid paths between points
-		# Start from current fleet position to first point
 		current_start = fleet.position
 		
-		# Filter out home colony from collision detection for patrol paths
-		# Patrol waypoints orbit the home planet, so it shouldn't be treated as an obstacle
 		other_colonies = [c for c in all_colonies if c.colony.id != self.colony.id] if all_colonies else None
 		
 		# Add path to first point
@@ -1208,9 +1132,7 @@ class Colony:
 		# Check cooldown
 		if time.time() - self.last_flanker_build_time < flanker_build_cooldown:
 			return False
-			
-		# REQUIREMENT: Must have at least one oil pump to build fleets
-		# This ensures they have established some infrastructure first
+
 		if not self.colony.planet.oilPumps or len(self.colony.planet.oilPumps) < 1:
 			return False
 		
@@ -1268,10 +1190,7 @@ class Colony:
 		# Initialize colonyFleet if needed
 		if self.colony.colonyFleet is None:
 			self.colony.colonyFleet = []
-		
-		# Create a single fleet entity that represents the flanker group
-		# The frontend will handle rendering the formation based on count
-		
+
 		group_id = str(uuid.uuid4())[:8]
 		
 		# Get fleet stats from config
@@ -1751,8 +1670,6 @@ class Colony:
 		# Check all planets for obstruction
 		for c in all_colonies:
 			p_pos = c.colony.planet.position
-			# Use the same radius formula as the hard-clip check + a buffer for smooth avoidance
-			# Hard clip is: scale * rad * 1.1 + 3.0
 			base_safe_radius = c.colony.planet.scale * planet_model_radius * 1.1 + 3.0
 			p_radius = base_safe_radius * 1.2 # Give it 20% more clearance for steering
 			
@@ -1761,13 +1678,8 @@ class Colony:
 			oy = p_pos.y - start.y
 			oz = p_pos.z - start.z
 			
-			# Project planet center onto line of flight
-			# t = Dot(SphereCenter - Start, Dir)
 			t = ox * ndx + oy * ndy + oz * ndz
-			
-			# Planet is behind us (and we are outside) or too far ahead
-			# Note: If we are INSIDE the radius (t < 0 but close), we might need to escape. 
-			# But "push out" logic handles escape. This handles "Navigation".
+
 			if t < 0 or t > total_dist:
 				continue
 				
@@ -1795,9 +1707,7 @@ class Colony:
 		# Re-calculate specific radius for the intersected planet
 		base_safe_radius = c.colony.planet.scale * planet_model_radius * 1.1 + 3.0
 		p_radius = base_safe_radius * 1.2
-		
-		# We want a detour point at the "Horizon" of the safety sphere.
-		# Construct closest point on the ray
+
 		cpx = start.x + ndx * t
 		cpy = start.y + ndy * t
 		cpz = start.z + ndz * t
@@ -1812,9 +1722,7 @@ class Colony:
 			# Direct hit through center. Pick arbitrary up.
 			rad_x, rad_y, rad_z = 0.0, 1.0, 0.0
 			rad_len = 1.0
-		
-		# Detour point: Move the closest collision point OUTWARD to the safety radius
-		# This effectively aims the ship at the "edge" of the planet interference zone
+
 		buffer = 1.2
 		detour_x = p_pos.x + (rad_x / rad_len) * (p_radius * buffer)
 		detour_y = p_pos.y + (rad_y / rad_len) * (p_radius * buffer)
@@ -1927,17 +1835,13 @@ class Colony:
 				should_engage = True
 			
 		elif fleet.state == "Moving":
-			# Moving fleets engage if:
-			# 1. Enemy is very close (immediate threat)
-			# 2. OR they're not on a coordinated attack mission
 			if distance < fleet_engagement_priority_distance:
 				should_engage = True
 			elif not (fleet.target and fleet.target.id == self.attack_target_colony_id):
 				# Not on coordinated attack, can intercept
 				if distance < fleet_awareness_radius * 0.7:  # Within 70% of awareness radius
 					should_engage = True
-		
-		# Already attacking someone else - only switch if this enemy is much closer
+
 		if fleet.state == "Attacking" and fleet.target:
 			# Don't switch targets unless this is significantly closer
 			return
@@ -1987,8 +1891,7 @@ class Colony:
 		if dist_sq >= radius*radius:
 			return None # No intersection
 			
-		# Intersection!
-		# Calculate detour direction: Normalize CP (outward from center)
+		# Calculate detour direction
 		dist = math.sqrt(dist_sq)
 		if dist < 0.001:
 			# Passes through center? Pick arbitrary "Up" or orthogonal
@@ -2048,9 +1951,7 @@ class Colony:
 		"""Order fleet to move to a firing position near target."""
 		
 		final_pos = None
-		
-		# Strategy 1: For Base targets, aim for a position "Above" the base relative to planet center
-		# This guarantees Line of Sight and prevents trying to path through the planet
+
 		if target_type == "Base":
 			# Find the owner colony to get planet center
 			target_colony = next((c for c in all_colonies if c.colony.id == target_id), None)
@@ -2075,8 +1976,6 @@ class Colony:
 						z = target_pos.z + nz * attack_range
 					)
 
-		# Strategy 2: Default / Fallback (For fleets or if base lookup failed)
-		# Aim for a point along the line between Fleet and Target
 		if not final_pos:
 			dx = fleet.position.x - target_pos.x
 			dy = fleet.position.y - target_pos.y
@@ -2100,8 +1999,6 @@ class Colony:
 		waypoints = self._generate_path_waypoints(fleet.position, final_pos, all_colonies)
 		
 		fleet.waypoints = waypoints
-		# Use elevated target position for Base targets so ships aim at the
-		# visual center of the settlement, not the ground beneath it
 		if target_type == "Base":
 			target_colony = next((c for c in all_colonies if c.colony.id == target_id), None)
 			aim_pos = target_colony._get_base_target_position() if target_colony else target_pos
@@ -2132,8 +2029,6 @@ class Colony:
 		
 		parking_spots = []
 		
-		# Create a coordinate system with the normal as "up"
-		# Find a perpendicular "right" vector
 		if abs(ny) > 0.9:
 			# Normal is close to Y axis, use X as reference
 			rx, ry, rz = 1, 0, 0
@@ -2163,8 +2058,6 @@ class Colony:
 		if f_len > 0.001:
 			fx, fy, fz = fx/f_len, fy/f_len, fz/f_len
 		
-		# Generate spots in a spherical pattern around the base
-		# Use golden spiral or simple angular distribution
 		for i in range(num_spots):
 			# Use spherical coordinates with some randomness
 			theta = (i * 2 * math.pi / num_spots) + random.uniform(-0.3, 0.3)  # Horizontal angle
@@ -2173,17 +2066,10 @@ class Colony:
 			# Radial distance with some spread
 			radius = attack_parking_spot_distance + random.uniform(-attack_parking_spot_spread, attack_parking_spot_spread)
 			
-			# Convert spherical to Cartesian in local coordinate system
-			# x = radius * sin(phi) * cos(theta)
-			# y = radius * sin(phi) * sin(theta)  
-			# z = radius * cos(phi)
-			
 			local_x = radius * math.sin(phi) * math.cos(theta)
 			local_y = radius * math.sin(phi) * math.sin(theta)
 			local_z = radius * math.cos(phi)
 			
-			# Transform to world space using our coordinate system
-			# Position = Base + local_x*Right + local_y*Forward + local_z*Normal
 			spot_x = target_base_pos.x + local_x*t_rx + local_y*fx + local_z*nx
 			spot_y = target_base_pos.y + local_x*t_ry + local_y*fy + local_z*ny
 			spot_z = target_base_pos.z + local_x*t_rz + local_y*fz + local_z*nz
@@ -2238,8 +2124,6 @@ class Colony:
 		if self.colony.trait == ColonyTrait.Pacifist.value:
 			return False
 
-		# Non-master colonies don't initiate attacks independently;
-		# they follow the master's decisions via _sync_with_hive().
 		if self.colony.owner_id != self.colony.id:
 			return False
 		
@@ -2265,12 +2149,8 @@ class Colony:
 		if not has_enemies:
 			return False
 		
-		# Always update the decision time so checks are properly spaced,
-		# regardless of whether the roll succeeds or fails.
 		self.attack_decision_time = current_time
 
-		# Trait-based decision — low probabilities per tick so colonies
-		# don't attack the moment they build a fleet.
 		if self.colony.trait == ColonyTrait.Aggressive.value:
 			return random.random() < 0.05   # 5 % per eligible tick
 		elif self.colony.trait == ColonyTrait.Defensive.value:
@@ -2326,14 +2206,14 @@ class Colony:
 		if not potential_targets:
 			return None
 		
-		# Sort by distance and pick closest (or could use other strategies)
+		# Sort by distance and pick closest 
 		potential_targets.sort(key=lambda x: x[0])
 		
 		# Aggressive colonies might prefer weaker targets
 		if self.colony.trait == ColonyTrait.Aggressive.value:
 			# Pick from closest 3 based on weakness
 			candidates = potential_targets[:min(3, len(potential_targets))]
-			# Sort by residents (weaker = fewer residents)
+			# Sort by residents
 			candidates.sort(key=lambda x: x[1].colony.residents)
 			return candidates[0][1] if candidates else None
 		
@@ -2345,7 +2225,7 @@ class Colony:
 		if not self.colony.colonyFleet:
 			return
 		
-		# Filter available fleets (not already attacking this target)
+		# Filter available fleets
 		available_fleets = [
 			f for f in self.colony.colonyFleet 
 			if f.state in ["Idle", "Patrolling"] and 
@@ -2359,7 +2239,7 @@ class Colony:
 		self.attack_target_colony_id = target_colony.colony.id
 		self.attack_decision_time = time.time()
 		
-		# Assign parking spots to ALL fleets (including already attacking ones)
+		# Assign parking spots to ALL fleets 
 		all_attacking_fleets = [
 			f for f in self.colony.colonyFleet
 			if f.target and f.target.id == target_colony.colony.id
@@ -2371,7 +2251,7 @@ class Colony:
 		target_base_pos = target_colony._get_planet_base_position()
 		target_id = target_colony.colony.id
 		
-		# Order each NEW fleet to move to its assigned parking spot
+		# Order each new fleet to move to its assigned parking spot
 		for fleet in available_fleets:
 			self._add_fleet_to_attack(fleet, target_colony)
 		
@@ -2391,8 +2271,6 @@ class Colony:
 		if not parking_spot:
 			return
 		
-		# Get target information — use elevated position so ships aim at the
-		# visual center of the settlement, not the ground
 		target_attack_pos = target_colony._get_base_target_position()
 		target_id = target_colony.colony.id
 		
@@ -2425,7 +2303,7 @@ class Colony:
 			self._add_fleet_to_attack(fleet, target_colony)
 
 	# ------------------------------------------------------------------
-	# Hive-mind synchronisation
+	# Hive-mind
 	# ------------------------------------------------------------------
 
 	def _sync_with_hive(self, all_colonies: List['Colony']):
@@ -2473,13 +2351,11 @@ class Colony:
 
 	def update_combat(self, delta_time: float, all_colonies: List['Colony']):
 		"""Handle combat logic for fleets and base."""
-		# 1. Fleets
-		# Create a copy of the fleet list to avoid modification-during-iteration issues
+
 		if self.colony.colonyFleet:
 			# Make a shallow copy of the list (not the fleet objects)
 			fleets_to_process = list(self.colony.colonyFleet)
 			for fleet in fleets_to_process:
-				# Verify fleet still exists (might have been removed in previous iteration)
 				if fleet not in self.colony.colonyFleet:
 					continue
 					
@@ -2532,8 +2408,13 @@ class Colony:
 			self._mark_changed()
 			return
 
-		# Use elevated target position for Base targets so ships aim at the
-		# visual center of the settlement, not the ground beneath it
+		if target_colony.colony.owner_id == self.colony.owner_id:
+			fleet.isAttacking = False
+			fleet.target = None
+			fleet.state = "Idle"
+			self._mark_changed()
+			return
+
 		if target_type == "Base":
 			fleet.target.position = target_colony._get_base_target_position()
 		else:
@@ -2553,32 +2434,21 @@ class Colony:
 		if target_type == "Fleet":
 			fleet_obj = cast(Fleet, target_obj)
 			
-			# If target is not yet engaging, force it to engage
-			# But if it's already Attacking someone else (target.isAttacking == True), we don't interrupt?
-			# User said: "Once a fleet is bound to attack another fleet, both will go into an 'attacking state'."
-			# "Keep in mind that two fleets can attack one fleet" - so 2 vs 1. 
-			# The single fleet can only be in one state. If it's already fighting someone, it stays fighting.
-			
-			# Force target to stay put and fight if potential victim
 			if fleet_obj.state != "Attacking":
 				fleet_obj.state = "Attacking"
 				fleet_obj.isAttacking = True
 				fleet_obj.velocity = Vector3(x=0.0, y=0.0, z=0.0)
-				fleet_obj.waypoints = [] # Stop moving
-				fleet_obj.combatWarmup = 2.0 # Force warmup on defender too
-				# Should we set defender's target to us?
-				# If defender has no target, yes.
+				fleet_obj.waypoints = [] 
+				fleet_obj.combatWarmup = 2.0 
+
 				if not fleet_obj.target or not fleet_obj.target.id:
 					fleet_obj.target = FleetTarget(id=fleet.id, position=fleet.position)
 				
 				target_colony._mark_changed()
 
-		# Handle Warmup
 		if fleet.combatWarmup > 0:
 			fleet.combatWarmup -= delta_time
-			# self._mark_changed() # Spammy if we update every tick just for timer?
-			# Maybe only sync it occasionally or let client infer?
-			# Code currently syncs all changes.
+			
 			return
 
 		dps = fleet.damage if fleet.damage is not None else 10.0
@@ -2589,7 +2459,7 @@ class Colony:
 			current_hp = float(fleet_obj.hpPool) if fleet_obj.hpPool is not None else 100.0
 			fleet_obj.hpPool = current_hp - damage
 			if fleet_obj.hpPool <= 0:
-				# Log fleet destruction for debugging
+				
 				print(f"Fleet {fleet_obj.id} destroyed. Target colony {target_colony.colony.name} had {len(target_colony.colony.colonyFleet) if target_colony.colony.colonyFleet else 0} fleets.")
 				
 				target_colony.remove_fleet(fleet_obj.id)
@@ -2622,11 +2492,7 @@ class Colony:
 		name, and trait.  Its attack state is cleared so _sync_with_hive()
 		will pick up the master's current campaign on the next tick.
 		"""
-		conqueror_name = self.colony.name  # Capture before any mutations
-
-		# Fire the defeat event BEFORE renaming the victim so the event's
-		# colonyName still reflects the original colony name, not the
-		# conqueror's name that is about to overwrite it.
+		conqueror_name = self.colony.name 
 		victim._add_action_event(f"Conquered by {conqueror_name}!", "defeat")
 
 		victim.colony.owner_id = self.colony.owner_id
@@ -2636,12 +2502,26 @@ class Colony:
 		victim.colony.trait = self.colony.trait  # Inherit conqueror's trait (hive mind)
 		victim.colony.colonyFleet = []
 
-		# Clear the victim's independent attack state so the hive sync
-		# can take over on the next tick.
 		victim.attack_target_colony_id = None
 		victim._fleet_parking_spots = {}
 
+		
+		self._recall_fleets_targeting(victim.colony.id)
+
 		victim._mark_changed()
+
+	def _recall_fleets_targeting(self, colony_id: str) -> None:
+		"""Disengage all own fleets whose current target is the given colony ID.
+
+		 Called after a conquest so the attacker's remaining fleets stop
+		 shooting at a colony that just became an ally.
+		"""
+		for fleet in (self.colony.colonyFleet or []):
+			if fleet.target and fleet.target.id == colony_id:
+				fleet.isAttacking = False
+				fleet.target = None
+				fleet.state = "Idle"
+		self._mark_changed()
 
 	def _resolve_base_defense(self, delta_time: float, all_colonies: List['Colony']):
 		"""Base defense logic: Shoot closest enemy."""
@@ -2658,8 +2538,7 @@ class Colony:
 			
 			if other.colony.colonyFleet:
 				for f in other.colony.colonyFleet:
-					# Rule: Only fire at fleets that are actively attacking THIS colony (Base)
-					# This prevents premature shooting while the fleet is moving to position
+					
 					if not (f.isAttacking and f.target and f.target.id == self.colony.id):
 						continue
 
