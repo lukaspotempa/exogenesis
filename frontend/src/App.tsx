@@ -7,11 +7,12 @@ import { GalaxySkybox } from './components/Scene/GalaxySkybox'
 import ColonyList from './components/UI/ColonyList'
 import PlanetDetails from './components/UI/PlanetDetails'
 import ActionLog from './components/UI/ActionLog'
-import { Suspense, useEffect, useState, useRef } from 'react'
+import VictoryScreen from './components/UI/VictoryScreen'
+import { Suspense, useCallback, useEffect, useState, useRef } from 'react'
 import * as THREE from 'three'
 import { coloniesStore } from './store/coloniesStore'
 import { sampleColonies } from './data/sampleData'
-import type { Colony } from './types/Types'
+import type { Colony, Fleet, GameOverPayload } from './types/Types'
 
 interface ControlsLike {
   target: THREE.Vector3;
@@ -117,6 +118,10 @@ function App() {
   const [activeColony, setActiveColony] = useState<Colony | null>(null);
   const [isUserInitiatedChange, setIsUserInitiatedChange] = useState(true);
   const [actionEvents, setActionEvents] = useState(() => coloniesStore.getActionEvents());
+  const [activeFleetId, setActiveFleetId] = useState<string | null>(null);
+  const [camPosition, setCamPosition] = useState<[number, number, number]>([0, 0, 50]);
+  const [camLookAt, setCamLookAt] = useState<[number, number, number]>([0, 0, 0]);
+  const [gameOver, setGameOver] = useState<GameOverPayload | null>(null);
   const controlsRef = useRef<ControlsLike | null>(null);
   const handleControlsRef = (instance: unknown) => {
 
@@ -157,15 +162,25 @@ function App() {
         const data = JSON.parse(ev.data);
         
         if (data && data.type === 'snapshot' && Array.isArray(data.colonies)) {
-          // Initial snapshot - update the global store and local state
+          // Initial snapshot (also sent after game restart)
           coloniesStore.setColonies(data.colonies);
           
           if (data.actionEvents && Array.isArray(data.actionEvents)) {
             coloniesStore.setActionEvents(data.actionEvents);
+          } else {
+            coloniesStore.clearActionEvents();
           }
           
           setColonies(data.colonies as Colony[]);
-          setActiveColony((data.colonies as Colony[])?.[0] ?? null);
+          const firstColony = (data.colonies as Colony[])?.[0] ?? null;
+          setActiveColony(firstColony);
+          if (firstColony) {
+            setCamPosition([firstColony.planet.position.x, firstColony.planet.position.y, firstColony.planet.position.z + 30]);
+            setCamLookAt([firstColony.planet.position.x, firstColony.planet.position.y, firstColony.planet.position.z]);
+            setIsUserInitiatedChange(true);
+          }
+          setActiveFleetId(null);
+          setGameOver(null);
           return;
         }
         
@@ -178,6 +193,15 @@ function App() {
         if (data && data.type === 'action' && data.event) {
           // Action event from backend
           coloniesStore.addActionEvent(data.event);
+          return;
+        }
+
+        if (data && data.type === 'game_over') {
+          setGameOver({
+            winner: data.winner,
+            actionHistory: data.actionHistory ?? [],
+            restartAt: data.restartAt,
+          });
           return;
         }
       } catch {
@@ -220,13 +244,37 @@ function App() {
   useEffect(() => {
     coloniesStore.setColonies(sampleColonies);
     setColonies(sampleColonies);
+    const first = sampleColonies?.[0] ?? null;
+    setActiveColony(first);
+    if (first) {
+      setCamPosition([first.planet.position.x, first.planet.position.y, first.planet.position.z + 30]);
+      setCamLookAt([first.planet.position.x, first.planet.position.y, first.planet.position.z]);
+    }
     setIsUserInitiatedChange(true);
-    setActiveColony(sampleColonies?.[0] ?? null);
   }, []);
 
   useEffect(() => {
     if (!activeColony && colonies.length) setActiveColony(colonies[0]);
   }, [colonies, activeColony]);
+
+  const handleSelectColony = useCallback((colony: Colony) => {
+    setIsUserInitiatedChange(true);
+    setActiveColony(colony);
+    setActiveFleetId(null);
+    setCamPosition([colony.planet.position.x, colony.planet.position.y, colony.planet.position.z + 30]);
+    setCamLookAt([colony.planet.position.x, colony.planet.position.y, colony.planet.position.z]);
+  }, []);
+
+  const handleSelectFleet = useCallback((fleet: Fleet) => {
+    setIsUserInitiatedChange(true);
+    setActiveFleetId(fleet.id);
+    setCamPosition([fleet.position.x, fleet.position.y, fleet.position.z + 15]);
+    setCamLookAt([fleet.position.x, fleet.position.y, fleet.position.z]);
+  }, []);
+
+  const handleGameRestart = useCallback(() => {
+    setGameOver(null);
+  }, []);
 
   return (
     <div>
@@ -236,10 +284,9 @@ function App() {
             <ColonyList 
               colonies={colonies} 
               activeColony={activeColony!} 
-              setActiveColony={(colony) => {
-                setIsUserInitiatedChange(true);
-                setActiveColony(colony);
-              }} 
+              setActiveColony={handleSelectColony}
+              onSelectFleet={handleSelectFleet}
+              activeFleetId={activeFleetId ?? undefined}
             />
           </div>
           <div className="colony-details-container">
@@ -249,12 +296,15 @@ function App() {
             <ActionLog events={actionEvents} />
           </div>
         </div>
+        {gameOver && (
+          <VictoryScreen gameOver={gameOver} onRestart={handleGameRestart} />
+        )}
         <Canvas shadows>
           <Suspense fallback={null}>
             {/* compute camera target from active colony position */}
             <CameraController
-              position={activeColony ? [activeColony.planet.position.x, activeColony.planet.position.y, activeColony.planet.position.z + 30] : [0, 0, 50]}
-              lookAt={activeColony ? [activeColony.planet.position.x, activeColony.planet.position.y, activeColony.planet.position.z] : [0, 0, 0]}
+              position={camPosition}
+              lookAt={camLookAt}
               controlsRef={controlsRef}
               isUserInitiated={isUserInitiatedChange}
             />

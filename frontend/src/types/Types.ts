@@ -98,5 +98,15 @@ export interface ActionEvent {
     colonyId: string;
     colonyName: string;
     message: string;
-    type: 'build' | 'upgrade' | 'attack' | 'destroy' | 'level-up' | 'general';
+    type: 'build' | 'upgrade' | 'attack' | 'destroy' | 'level-up' | 'victory' | 'general';
+}
+
+export interface GameOverPayload {
+    winner: {
+        id: string;
+        name: string;
+        color: string;
+    };
+    actionHistory: ActionEvent[];
+    restartAt: number; // Unix timestamp (seconds) when the new game starts
 }

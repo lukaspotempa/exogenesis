@@ -99,6 +99,10 @@ export function SpaceshipScout({ colonyColor, isAttacking, target }: ShipProps):
         const targetPos = new THREE.Vector3(target.position.x, target.position.y, target.position.z ?? 0);
         const dir = targetPos.clone().sub(origin).normalize();
         const speed = 5;
+        const bulletSpeed = speed * 1.5; // Scout fires fast projectiles
+        // Use distance-based TTL so bullets always reach the target regardless of
+        // how far the fleet has parked from the base (parking distance varies 14–20 units).
+        const ttl = origin.distanceTo(targetPos) / bulletSpeed + 1.0;
 
         // Scout has fast, small projectiles
         const geom = new THREE.BoxGeometry(0.005, 0.4, 0.005);
@@ -115,8 +119,8 @@ export function SpaceshipScout({ colonyColor, isAttacking, target }: ShipProps):
         projectilesRef.current.push({
           id: Math.random().toString(),
           mesh,
-          velocity: dir.multiplyScalar(speed * 1.5),
-          ttl: 2,
+          velocity: dir.multiplyScalar(bulletSpeed),
+          ttl,
           targetPos
         });
       }

@@ -99,6 +99,9 @@ export function SpaceshipFighter({ colonyColor, isAttacking, target }: ShipProps
                 const targetPos = new THREE.Vector3(target.position.x, target.position.y, target.position.z ?? 0);
                 const dir = targetPos.clone().sub(origin).normalize();
                 const speed = 5;
+                // Use distance-based TTL so bullets always reach the target regardless of
+                // how far the fleet has parked from the base (parking distance varies 14–20 units).
+                const ttl = origin.distanceTo(targetPos) / speed + 1.0;
 
                 const geom = new THREE.BoxGeometry(0.01, 0.3, 0.01);
                 const mat = new THREE.MeshBasicMaterial({ color: '#ff0040' });
@@ -115,7 +118,7 @@ export function SpaceshipFighter({ colonyColor, isAttacking, target }: ShipProps
                     id: Math.random().toString(),
                     mesh,
                     velocity: dir.multiplyScalar(speed),
-                    ttl: 3,
+                    ttl,
                     targetPos
                 });
             }

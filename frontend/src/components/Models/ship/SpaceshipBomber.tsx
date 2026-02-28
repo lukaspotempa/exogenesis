@@ -99,6 +99,10 @@ export function SpaceshipBomber({ colonyColor, isAttacking, target }: ShipProps)
         const targetPos = new THREE.Vector3(target.position.x, target.position.y, target.position.z ?? 0);
         const dir = targetPos.clone().sub(origin).normalize();
         const speed = 5;
+        const bulletSpeed = speed * 0.8; // Bomber fires slower projectiles
+        // Use distance-based TTL so bullets always reach the target regardless of
+        // how far the fleet has parked from the base (parking distance varies 14–20 units).
+        const ttl = origin.distanceTo(targetPos) / bulletSpeed + 1.0;
 
         // Bomber launches larger projectiles
         const geom = new THREE.SphereGeometry(0.04);
@@ -115,8 +119,8 @@ export function SpaceshipBomber({ colonyColor, isAttacking, target }: ShipProps)
         projectilesRef.current.push({
           id: Math.random().toString(),
           mesh,
-          velocity: dir.multiplyScalar(speed * 0.8), // Slower projectiles
-          ttl: 4,
+          velocity: dir.multiplyScalar(bulletSpeed),
+          ttl,
           targetPos
         });
       }

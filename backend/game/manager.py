@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException
 import random
 import asyncio
+import time
 from .colony import Colony
 import json
 
@@ -32,6 +33,8 @@ class GameManager:
         self.colonies: List[Colony] = []
         self._connection_manager = None
         self.action_history: List[dict] = []  # Store global action history
+        self._game_over_announced: bool = False
+        self._restart_task: Optional[asyncio.Task] = None
 
     def set_connection_manager(self, connection_manager):
         """Set the connection manager for broadcasting updates."""
@@ -67,33 +70,37 @@ class GameManager:
         self.colonies.clear()
         created = []
         
-        # Colony 1: Attacker (Red) at (-75, 0, 0)
+        # Colony 1: Attacker (Red) - fully maxed out
         c1_payload = {
             "name": "Red Attacker",
-            "residents": 1000,
+            "residents": 50000,
             "color": "#FF0000",
-            "colonyLevel": "Metropolis", # High level
+            "colonyLevel": "Starport Hub",
             "trait": "Aggressive",
             "planet": {
                 "position": {"x": -75.0, "y": 0.0, "z": 0.0},
                 "scale": 1.0,
                 "rot": {"x": 0.0, "y": 0.0, "z": 0.0},
                 "planetModelName": "Planet_A",
-                "planetMainBase": {"x": 0.0, "y": 0.0}, # Centered base
+                "planetMainBase": {"x": 0.0, "y": 0.0},
                 "planetNaturalResources": {
-                    "oil": 2.0, "steel": 2.0, "water": 2.0, "temperature": 15.0,
-                    "oilStorage": 9000.0, "steelStorage": 9000.0, "waterStorage": 9000.0 # Plenty of resources
+                    "oil": 5.0, "steel": 5.0, "water": 5.0, "temperature": 15.0,
+                    "oilStorage": 99999.0, "steelStorage": 99999.0, "waterStorage": 99999.0
                 },
-                "oilPumps": [{"id": "init_pump_1", "position": {"x": 0.1, "y": 0.1}, "production": 1.0}] # Ensure requirements met
+                "oilPumps": [
+                    {"id": "init_pump_1", "position": {"x": 0.1, "y": 0.1}, "production": 5.0},
+                    {"id": "init_pump_2", "position": {"x": -0.2, "y": 0.2}, "production": 5.0},
+                    {"id": "init_pump_3", "position": {"x": 0.2, "y": -0.2}, "production": 5.0}
+                ]
             }
         }
         
-        # Colony 2: Defender (Blue) at (75, 0, 0)
+        # Colony 2: Defender (Blue) - bare Colony, barely alive
         c2_payload = {
             "name": "Blue Defender",
-            "residents": 1000,
-            "color": "#0000FF",
-            "colonyLevel": "Metropolis",
+            "residents": 100,
+            "color": "#0055FF",
+            "colonyLevel": "Colony",
             "trait": "Defensive",
             "planet": {
                 "position": {"x": 75.0, "y": 0.0, "z": 0.0},
@@ -102,10 +109,10 @@ class GameManager:
                 "planetModelName": "Planet_B",
                 "planetMainBase": {"x": 0.0, "y": 0.0},
                 "planetNaturalResources": {
-                    "oil": 2.0, "steel": 2.0, "water": 2.0, "temperature": 15.0,
-                    "oilStorage": 9000.0, "steelStorage": 9000.0, "waterStorage": 9000.0
+                    "oil": 0.5, "steel": 0.5, "water": 0.5, "temperature": 15.0,
+                    "oilStorage": 250.0, "steelStorage": 300.0, "waterStorage": 300.0
                 },
-                "oilPumps": [{"id": "init_pump_2", "position": {"x": 0.1, "y": 0.1}, "production": 1.0}]
+                "oilPumps": []
             }
         }
         
@@ -117,14 +124,16 @@ class GameManager:
         c1_obj = self.colonies[-2] # Red
         c2_obj = self.colonies[-1] # Blue
         
-        # Give Red some ships
-        c1_obj.build_flanker_group()
-        c1_obj.build_bomber_group()
+        # Give Red a full armada
+        for _ in range(5):
+            c1_obj.build_flanker_group()
+        for _ in range(3):
+            c1_obj.build_bomber_group()
+        for _ in range(3):
+            c1_obj.build_fighter_group()
         c1_obj.build_scout_group()
         
-        # Give Blue some ships
-        c2_obj.build_fighter_group()
-        c2_obj.build_scout_group()
+        # Blue gets nothing — it will be overwhelmed
 
         created.append(c1)
         created.append(c2)
@@ -206,48 +215,68 @@ class GameManager:
 
     def _check_win_condition(self, events_list: List[dict]):
         """Check if one colony has taken over all others."""
-        if not self.colonies:
+        if not self.colonies or self._game_over_announced:
             return
 
-        # Group by owner
         owners = set()
-        active_owners = set()
-        
         for c in self.colonies:
             owner = c.colony.owner_id if c.colony.owner_id else c.colony.id
             owners.add(owner)
-            # Consider a colony 'active' if it has not been taken over (owner_id == id)
-            # OR just strictly check if everyone has the same owner.
-        
+
         if len(owners) == 1 and len(self.colonies) > 1:
             winner_id = list(owners)[0]
-            winner_name = next((c.colony.name for c in self.colonies if c.colony.id == winner_id), "Unknown")
-            
-            # Check if we already broadcasted win (could use a flag in GameManager)
-            # For now, let's just emit an event if not just emitted.
-            # Ideally we stop the game or pause it, or just notify.
-            # Let's add a 'GAME OVER' event.
-            
-            # Simple debounce or check state required to not spam? 
-            # Assuming the frontend handles "Game Over" gracefully or we just spam it every tick (bad).
-            # Let's check if we have a winner and haven't announced it.
-            # Since I don't have game state persistence for 'finished', I'll just check if it's a NEW win condition.
-            # But 'owners' will be 1 forever after win.
-            
-            # Maybe just send a special event type "game_over"
-            # But I'll append to events_list for now.
-            
-            # To prevent spam, I'll store 'game_over' state
-            if not getattr(self, '_game_over_announced', False):
-                 events_list.append({
-                    "id": "game-over",
-                    "timestamp": asyncio.get_event_loop().time(),
-                    "colonyId": winner_id,
-                    "colonyName": winner_name,
-                    "message": f"{winner_name} has conquered the galaxy!",
-                    "type": "victory"
-                })
-                 self._game_over_announced = True
+            winner_colony = next((c for c in self.colonies if c.colony.id == winner_id), None)
+            winner_name = winner_colony.colony.name if winner_colony else "Unknown"
+            winner_color = winner_colony.colony.color if winner_colony else "#ffffff"
+
+            self._game_over_announced = True
+            restart_at = time.time() + 60  # 60-second cooldown
+
+            game_over_msg = {
+                "type": "game_over",
+                "winner": {
+                    "id": winner_id,
+                    "name": winner_name,
+                    "color": winner_color,
+                },
+                "actionHistory": list(self.action_history),
+                "restartAt": restart_at,
+            }
+
+            if self._connection_manager:
+                asyncio.create_task(self._connection_manager.broadcast_json(game_over_msg))
+
+            # Schedule game reset after cooldown
+            self._restart_task = asyncio.create_task(self._schedule_restart(60))
+
+    async def _schedule_restart(self, delay: float) -> None:
+        """Wait `delay` seconds, then reset and restart the game."""
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+
+        # Stop the current game loop
+        await self.stop_game_loop()
+
+        # Clear all state
+        self.colonies.clear()
+        self.action_history.clear()
+        self._game_over_announced = False
+        self._restart_task = None
+
+        # Re-initialise and start a fresh game
+        self.initialise_game()
+        await self.start_game_loop(interval=0.5)
+
+        # Broadcast a snapshot so all clients pick up the new game
+        if self._connection_manager:
+            snapshot = {
+                "type": "snapshot",
+                "colonies": self.list_colonies(),
+                "actionEvents": [],
+            }
+            await self._connection_manager.broadcast_json(snapshot)
 
     async def _broadcast_changes(self, changes: List[dict]) -> None:
         """Broadcast colony changes to all connected clients."""
